@@ -1,0 +1,45 @@
+<Window x:Class="VoiceBridge.App.MainWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="VoiceBridge 0.3.1 · 人声与音乐共享" Icon="Assets/voicebridge.ico" Width="850" Height="930" MinWidth="700" MinHeight="680" Background="#101927" WindowStartupLocation="CenterScreen">
+ <ScrollViewer VerticalScrollBarVisibility="Auto">
+  <StackPanel Margin="32,26,32,28">
+   <DockPanel>
+    <StackPanel Orientation="Horizontal"><Image Source="Assets/voicebridge.png" Width="54" Height="54" Margin="0,0,12,0" RenderOptions.BitmapScalingMode="HighQuality"/><StackPanel><TextBlock Text="VoiceBridge" FontSize="30" FontWeight="SemiBold"/><TextBlock Text="把音乐带进频道，让交流继续。" Foreground="#9FACBF" Margin="0,6,0,0"/></StackPanel></StackPanel>
+    <Border Background="#23384A" CornerRadius="12" Padding="12,6" HorizontalAlignment="Right" VerticalAlignment="Top"><TextBlock Text="Win11 · x64" Foreground="#8EDCCD"/></Border>
+   </DockPanel>
+   <Border Background="#1A293E" CornerRadius="10" Padding="16" Margin="0,20,0,18">
+    <StackPanel><TextBlock x:Name="PlatformText" TextWrapping="Wrap"/><TextBlock Text="仅捕获 QQMusic 进程树。游戏、队友语音和 QQ音乐的本地输出都应选择耳机。" TextWrapping="Wrap" Foreground="#9FACBF" Margin="0,7,0,0"/></StackPanel>
+   </Border>
+   <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
+    <StackPanel Grid.Column="0"><TextBlock Text="真实麦克风" FontWeight="SemiBold"/><ComboBox x:Name="MicrophoneBox" AutomationProperties.Name="真实麦克风"/><TextBlock Text="人声与音乐独立调节。不会播放自己的麦克风。" FontSize="12" Foreground="#9FACBF" TextWrapping="Wrap"/></StackPanel>
+    <StackPanel Grid.Column="2"><TextBlock Text="虚拟设备的发送端" FontWeight="SemiBold"/><ComboBox x:Name="CableBox" AutomationProperties.Name="虚拟设备发送端"/><TextBlock Text="语音软件的麦克风请选择 CABLE Output。" FontSize="12" Foreground="#9FACBF" TextWrapping="Wrap"/></StackPanel>
+   </Grid>
+   <WrapPanel Margin="0,18,0,20"><Button x:Name="RefreshButton" Content="刷新设备" Click="Refresh_Click"/><Button x:Name="RepairButton" Content="修复播放路由" Click="Repair_Click" ToolTip="将错误指向 VB-CABLE 的默认播放改为当前正常听音设备，并保存备份。"/><Button Content="Windows 声音设置" Click="SoundSettings_Click"/><Button Content="导出诊断" Click="Diagnostics_Click"/></WrapPanel>
+   <Border Background="#182437" CornerRadius="12" Padding="20">
+    <StackPanel>
+     <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="135"/><ColumnDefinition Width="65"/></Grid.ColumnDefinitions><TextBlock Text="人声" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/><Button x:Name="MicrophoneButton" Grid.Column="1" Content="人声：关" Click="Microphone_Click" AutomationProperties.Name="人声独立开关" ToolTip="仅控制传给对方的人声；不影响音乐。" Background="#30445C"/><TextBlock x:Name="MicValue" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
+     <Slider x:Name="MicSlider" Minimum="0" Maximum="200" Value="100" ValueChanged="Volume_Changed" AutomationProperties.Name="麦克风音量"/>
+     <ProgressBar x:Name="MicMeter" Minimum="0" Maximum="1" Height="5" BorderThickness="0" Foreground="#84CBFF" Background="#293951"/>
+     <Grid Margin="0,20,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="135"/><ColumnDefinition Width="65"/></Grid.ColumnDefinitions><TextBlock Text="QQ音乐" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/><Button x:Name="ShareButton" Grid.Column="1" Content="音乐：关" Click="Share_Click" AutomationProperties.Name="音乐独立开关" ToolTip="仅控制传给对方的音乐；不改变你耳机里的播放。" Background="#24433F"/><TextBlock x:Name="MusicValue" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
+     <Slider x:Name="MusicSlider" Minimum="0" Maximum="100" Value="35" ValueChanged="Volume_Changed" AutomationProperties.Name="音乐共享音量"/>
+     <ProgressBar x:Name="MusicMeter" Minimum="0" Maximum="1" Height="5" BorderThickness="0" Foreground="#71E0C0" Background="#293951"/>
+     <TextBlock x:Name="ProcessText" Text="自动识别 QQMusic.exe · 等待打开 QQ音乐" Margin="0,12,0,16" Foreground="#9FACBF"/>
+     <Button x:Name="StartButton" Content="启动人声" Click="Start_Click" Background="#3456C5" FontSize="16" Margin="0"/>
+     <TextBlock x:Name="StatusText" Text="点击任一路开关即可开始。两路都关闭时停止音频采集。" Foreground="#9FACBF" TextWrapping="Wrap" Margin="0,14,0,0"/>
+    </StackPanel>
+   </Border>
+   <TextBlock Text="关闭或最小化窗口后在托盘继续运行；右键托盘图标可控制声音或退出。" Margin="0,12,0,0" Foreground="#9FACBF" TextWrapping="Wrap"/>
+   <TextBlock x:Name="HotkeyText" Text="Ctrl+Alt+F8 人声 · Ctrl+Alt+F9 音乐 · Ctrl+Alt+↑/↓ 音乐音量" Margin="0,8,0,0" Foreground="#AEBBD2" TextWrapping="Wrap"/>
+   <TextBlock x:Name="TelemetryText" Text="原声稳定：固定增益，不随说话自动压低音乐。" Margin="0,8,0,12" Foreground="#7F90AA" TextWrapping="Wrap"/>
+   <WrapPanel Margin="0,0,0,18"><Button x:Name="StableVolumeButton" Content="关闭通话自动压低音量" Click="StableVolume_Click"/><Button Content="各平台音质设置" Click="QualityHelp_Click"/><Button Content="第三方许可" Click="Licenses_Click"/></WrapPanel>
+   <Border Background="#182437" CornerRadius="10" Padding="16">
+    <StackPanel>
+     <DockPanel><TextBlock Text="虚拟音频组件 · VB-CABLE" FontWeight="SemiBold"/><Button x:Name="InstallButton" Content="打开官方安装器" Click="Install_Click" DockPanel.Dock="Right" HorizontalAlignment="Right" Margin="15,0,0,0"/></DockPanel>
+     <TextBlock Text="原厂签名安装包已随软件附带。安装需要管理员授权，按原厂提示完成后重启；安装可能改变系统默认设备，请改回耳机。" Foreground="#9FACBF" TextWrapping="Wrap" Margin="0,10,0,8"/>
+     <TextBlock Foreground="#9FACBF" TextWrapping="Wrap">VB-CABLE 来自 <Hyperlink NavigateUri="https://vb-audio.com/Cable/" RequestNavigate="Link_Click">VB-Audio</Hyperlink>，采用 donationware。发现有用时，请向原作者<Hyperlink NavigateUri="https://shop.vb-audio.com/en/win-apps/11-vb-cable.html" RequestNavigate="Link_Click">捐赠或购买许可</Hyperlink>。企业分发请遵守<Hyperlink NavigateUri="https://vb-audio.com/Services/licensing.htm" RequestNavigate="Link_Click">原厂许可</Hyperlink>。</TextBlock>
+    </StackPanel>
+   </Border>
+   <TextBlock Text="建议使用耳机。应用隔离可以避免数字回传；扬声器串入真实麦克风的声学回声仍可能发生。语音软件的降噪、自动增益与编码也可能改变音乐效果。" Foreground="#7F90AA" FontSize="12" TextWrapping="Wrap" Margin="0,16,0,0"/>
+  </StackPanel>
+ </ScrollViewer>
+</Window>
