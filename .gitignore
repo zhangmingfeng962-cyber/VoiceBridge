@@ -1,0 +1,17 @@
+**/bin/
+**/obj/
+artifacts/
+.vs/
+.idea/
+TestResults/
+*.user
+*.suo
+*.log
+*.tmp
+*.pdb
+.env
+.env.*
+settings.json
+*diagnostics*.json
+audio-routes-before-*.json
+ducking-before-*.json
