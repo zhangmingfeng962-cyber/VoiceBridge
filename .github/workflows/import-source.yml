@@ -17,13 +17,17 @@ jobs:
       - name: Verify and import the public source archive
         shell: python
         run: |
-          import hashlib, pathlib, shutil, subprocess, tempfile, zipfile
+          import hashlib, pathlib, shutil, subprocess, sys, tempfile, zipfile
           root = pathlib.Path.cwd().resolve()
-          archive = root / 'VoiceBridge-v0.3.1-source.zip'
-          expected = 'd8f476f8f281b45ed1faf8b5944f0cef6f22f4f8a51c730368f68ea6ef859cc8'
+          archive = root / 'VoiceBridge-v0.3.2-source.zip'
+          expected = 'df26756f316b0de573931fd1d9fee0553faf84df2a7e8319552cfc3a088bf701'
           actual = hashlib.sha256(archive.read_bytes()).hexdigest()
           if actual != expected:
               raise RuntimeError('The source archive checksum does not match the reviewed release.')
+          marker = root / '.source-import-sha256'
+          if marker.is_file() and marker.read_text().strip() == expected:
+              print('This verified source was already imported; preserving subsequent edits.')
+              sys.exit(0)
           allowed = {'.gitattributes', '.gitignore', 'CHANGELOG.md', 'Directory.Build.props', 'global.json', 'LICENSE', 'README.md', 'README.zh-CN.md', 'VoiceBridge.sln', 'src', 'tests', 'scripts', 'third-party', 'docs'}
           with tempfile.TemporaryDirectory() as temporary:
               unpacked = pathlib.Path(temporary).resolve()
@@ -47,10 +51,11 @@ jobs:
                   destination.parent.mkdir(parents=True, exist_ok=True)
                   shutil.copyfile(file, destination)
                   count += 1
+          marker.write_text(expected + '\n')
           subprocess.run(['git', 'config', 'user.name', 'github-actions[bot]'], check=True)
           subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], check=True)
           subprocess.run(['git', 'add', '--all'], check=True)
           if subprocess.run(['git', 'diff', '--cached', '--quiet']).returncode:
-              subprocess.run(['git', 'commit', '-m', 'Import complete VoiceBridge v0.3.1 source'], check=True)
+              subprocess.run(['git', 'commit', '-m', 'Add startup toggle and complete VoiceBridge v0.3.2 source'], check=True)
               subprocess.run(['git', 'push', 'origin', 'HEAD:main'], check=True)
           print(f'Imported {count} reviewed source files.')
