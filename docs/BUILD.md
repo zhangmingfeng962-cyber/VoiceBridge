@@ -24,6 +24,8 @@ dotnet publish src\VoiceBridge.App\VoiceBridge.App.csproj -c Release -r win-x64 
 
 开发阶段通过了 DSP、格式转换、资源校验、窗口关闭 / 恢复、系统托盘及实例信号测试。进行过 Windows 原生进程捕获、两进程合成音隔离、混音通过已安装虚拟线缆的验证。图标变更后还检查了单文件发布中的图标和托盘资源。
 
+v0.3.2 增加自启动登记 / 关闭、含空格与中文的命令行路径、EXE 移动检测、静默启动到托盘及托盘不可用时显示窗口的测试。登记测试只使用随机命名的 `HKCU\Software\VoiceBridge.Tests` 子键，结束后清理，不会修改当前用户真正的 Windows 自启动项，也不会启动录音。
+
 这些短时、合成音和局部实机检查不代表所有用户设备、所有语音平台、长期负载或 <100 ms 已达标。仓库不包含开发者的设备报告、录音和个人路由备份。
 
 ## 音频测试
@@ -58,3 +60,5 @@ Remove-Item Env:\VOICEBRIDGE_FIXTURE
 ```
 
 `--probe-engine` 与上述检查不同：它会短时使用生产音频引擎和真实麦克风，仅适用于用户明确启用、虚拟线缆空闲的本地诊断；不要在通话期间执行。
+
+`--probe-tray` 也会验证首次启动时窗口保持隐藏、托盘可恢复，不会登记自启动。真实登录验证：在固定位置开启自启动，退出程序，注销后重新登录 Windows，确认仅托盘出现，再用托盘或手动双击恢复窗口；这个检查需要真实登录会话，不能用窗口测试代替。Windows 的 Run 启动规则见 [Microsoft 文档](https://learn.microsoft.com/en-us/windows/win32/setupapi/run-and-runonce-registry-keys)。

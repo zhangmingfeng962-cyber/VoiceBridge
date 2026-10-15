@@ -1,6 +1,7 @@
 using System.Windows.Threading;
 using System.Windows;
 using VoiceBridge.App;
+using VoiceBridge.App.Platform;
 using Xunit;
 
 namespace VoiceBridge.Tests;
@@ -38,6 +39,59 @@ public sealed class WindowTests
         Assert.True(closed);
         Assert.False(window.TrayIconVisible);
     }
+
+    [Fact]
+    public async Task StartupLaunchCreatesTrayWithoutShowingWindowAndCanRestore() => await OnSta(() =>
+    {
+        var window = CreateTrayWindow();
+        bool everVisible = false;
+        window.IsVisibleChanged += (_, _) => everVisible |= window.IsVisible;
+        window.ShowForLaunch(startInTray: true);
+        Assert.True(window.TrayIconVisible);
+        Assert.True(window.IsHiddenToTray);
+        Assert.False(window.ShowInTaskbar);
+        Assert.False(everVisible);
+        Assert.Equal("人声：关", ((System.Windows.Controls.Button)window.FindName("MicrophoneButton")).Content);
+        Assert.Equal("音乐：关", ((System.Windows.Controls.Button)window.FindName("ShareButton")).Content);
+        window.RestoreFromTray();
+        Assert.True(window.IsVisible);
+        ExitAndPump(window);
+    });
+
+    [Fact]
+    public async Task StartupFallsBackToVisibleWindowWhenTrayIsUnavailable() => await OnSta(() =>
+    {
+        var window = new MainWindow(persistSettingsOnClose: false, enableTray: false, showTrayNotifications: false);
+        window.ShowForLaunch(startInTray: true);
+        Assert.True(window.IsVisible);
+        Assert.False(window.IsHiddenToTray);
+        ExitAndPump(window);
+    });
+
+    [Fact]
+    public async Task StartupButtonReflectsPersistedSettingAndCanTurnItOff() => await OnSta(() =>
+    {
+        string keyPath = @"Software\VoiceBridge.Tests\StartupUi-" + Guid.NewGuid().ToString("N");
+        var registration = new StartupRegistration(keyPath, () => @"C:\Example Tools\VoiceBridge.exe");
+        var window = new MainWindow(persistSettingsOnClose: false, enableTray: false,
+            showTrayNotifications: false, startupRegistration: registration);
+        try
+        {
+            var button = (System.Windows.Controls.Button)window.FindName("StartupButton");
+            Assert.Equal("开机自启动：关", button.Content);
+            button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            Assert.True(registration.Read().Enabled);
+            Assert.Equal("开机自启动：开", button.Content);
+            button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            Assert.False(registration.Read().Enabled);
+            Assert.Equal("开机自启动：关", button.Content);
+        }
+        finally
+        {
+            ExitAndPump(window);
+            Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(keyPath, throwOnMissingSubKey: false);
+        }
+    });
 
     [Fact]
     public async Task CloseHidesToTrayAndRestoreKeepsTheWindowAlive() => await OnSta(() =>

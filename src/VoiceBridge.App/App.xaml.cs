@@ -78,10 +78,11 @@ public partial class App : Application
             try { Diagnostics.Write(path); Shutdown(0); } catch (Exception ex) { Log.Write(ex.ToString()); Shutdown(1); }
             return;
         }
+        bool startInTray = e.Args.Contains("--startup", StringComparer.OrdinalIgnoreCase);
         instance = new Mutex(true, "Local\\VoiceBridge.Desktop", out bool first);
         if (!first)
         {
-            if (!InstanceSignals.ShowExisting()) MessageBox.Show("VoiceBridge 正在启动，请稍后再次打开。", "VoiceBridge");
+            if (!startInTray && !InstanceSignals.ShowExisting()) MessageBox.Show("VoiceBridge 正在启动，请稍后再次打开。", "VoiceBridge");
             Shutdown(); return;
         }
         DispatcherUnhandledException += (_, args) =>
@@ -97,7 +98,7 @@ public partial class App : Application
             () => { if (!Dispatcher.HasShutdownStarted) _ = Dispatcher.BeginInvoke(new Action(window.RestoreFromTray)); },
             () => { if (!Dispatcher.HasShutdownStarted) _ = Dispatcher.BeginInvoke(new Action(window.RequestExit)); });
         SessionEnding += (_, _) => window.AllowSystemShutdown();
-        window.Show();
+        window.ShowForLaunch(startInTray);
     }
     private async Task RunProbeAsync(string path)
     {
@@ -115,7 +116,9 @@ public partial class App : Application
                 WindowStartupLocation = WindowStartupLocation.Manual, Left = -32000, Top = -32000,
                 ShowActivated = false, ShowInTaskbar = false
             };
-            window.Show();
+            window.ShowForLaunch(startInTray: true);
+            bool startupHidden = window.TrayIconVisible && window.IsHiddenToTray && !window.IsVisible && !window.ShowInTaskbar;
+            window.RestoreFromTray();
             await Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             bool trayCreated = window.TrayIconVisible;
             window.Close();
@@ -127,10 +130,10 @@ public partial class App : Application
             window.RequestExit();
             await closed.Task.WaitAsync(TimeSpan.FromSeconds(5));
             bool trayRemoved = !window.TrayIconVisible;
-            if (!trayCreated || !closeHidWindow || !restored || !trayRemoved) throw new InvalidOperationException("Tray lifecycle probe failed.");
+            if (!startupHidden || !trayCreated || !closeHidWindow || !restored || !trayRemoved) throw new InvalidOperationException("Tray lifecycle probe failed.");
             System.IO.File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new
             {
-                Version = BuildInfo.Version, TrayCreated = trayCreated, CloseHidWindow = closeHidWindow,
+                Version = BuildInfo.Version, StartupHiddenBeforeFirstShow = startupHidden, TrayCreated = trayCreated, CloseHidWindow = closeHidWindow,
                 RestoreSucceeded = restored, ExplicitExitClosedWindow = closed.Task.IsCompleted,
                 TrayRemovedOnExit = trayRemoved, AudioStarted = false
             }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));

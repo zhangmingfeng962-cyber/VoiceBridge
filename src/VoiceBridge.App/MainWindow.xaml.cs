@@ -24,14 +24,18 @@ public partial class MainWindow : Window
     private readonly bool supported = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 20348);
     private readonly bool persistSettingsOnClose;
     private readonly bool showTrayNotifications;
+    private readonly StartupRegistration startup;
     public bool IsHiddenToTray { get; private set; }
     public bool TrayIconVisible => tray?.Visible == true;
     public MainWindow() : this(true) { }
-    public MainWindow(bool persistSettingsOnClose, bool enableTray = true, bool showTrayNotifications = true)
+    public MainWindow(bool persistSettingsOnClose, bool enableTray = true, bool showTrayNotifications = true, StartupRegistration? startupRegistration = null)
     {
         this.persistSettingsOnClose = persistSettingsOnClose;
         this.showTrayNotifications = showTrayNotifications;
+        startup = startupRegistration ?? new StartupRegistration();
         InitializeComponent();
+        UpdateStartupControl();
+        Activated += (_, _) => UpdateStartupControl();
         MicSlider.Value = settings.MicrophoneVolume; MusicSlider.Value = settings.MusicVolume;
         UpdateVolumes();
         PlatformText.Text = supported ? "人声、音乐分别开关 · 关闭一路不会打断另一路" : "此 Windows 版本不支持进程音频捕获。普通 Win10 19045 无法使用本项目的共享功能，请升级到 Win11。";
@@ -188,7 +192,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex) { Log.Write(ex.ToString()); }
     }
-    public void HideToTray()
+    public void HideToTray(bool showNotification = true)
     {
         if (!TrayIconVisible || closing) return;
         SaveSettings();
@@ -196,7 +200,7 @@ public partial class MainWindow : Window
         ShowInTaskbar = false;
         IsHiddenToTray = true;
         Hide();
-        if (!trayNoticeShown && showTrayNotifications) { trayNoticeShown = true; tray?.ExplainMinimize(); }
+        if (showNotification && !trayNoticeShown && showTrayNotifications) { trayNoticeShown = true; tray?.ExplainMinimize(); }
     }
     public void RestoreFromTray()
     {
@@ -222,6 +226,51 @@ public partial class MainWindow : Window
         _ = Dispatcher.BeginInvoke(new Action(() => { exitQueued = false; Close(); }));
     }
     private void Refresh_Click(object sender, RoutedEventArgs e) => RefreshDevices();
+    private void UpdateStartupControl()
+    {
+        try
+        {
+            var state = startup.Read();
+            StartupButton.IsEnabled = true;
+            StartupButton.Content = state.Enabled ? "开机自启动：开" : "开机自启动：关";
+            StartupButton.Background = new System.Windows.Media.SolidColorBrush(state.Enabled
+                ? System.Windows.Media.Color.FromRgb(27, 119, 94) : System.Windows.Media.Color.FromRgb(48, 68, 92));
+            StartupStatusText.Text = !state.Enabled ? "点击开启；请将 EXE 保留在固定位置。"
+                : state.UsesCurrentExecutable ? "登录 Windows 后收起到托盘；人声、音乐保持关闭。"
+                : "EXE 位置已改变。关闭后重新开启可更新启动位置。";
+        }
+        catch (Exception ex)
+        {
+            Log.Write(ex.ToString());
+            StartupButton.Content = "开机自启动：不可用";
+            StartupButton.IsEnabled = false;
+            StartupStatusText.Text = "无法读取启动设置：" + ex.GetBaseException().Message;
+        }
+    }
+    private void Startup_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            startup.SetEnabled(!startup.Read().Enabled);
+            UpdateStartupControl();
+        }
+        catch (Exception ex)
+        {
+            UpdateStartupControl();
+            Log.Write(ex.ToString());
+            StartupStatusText.Text = "设置失败：" + ex.GetBaseException().Message;
+        }
+    }
+    public void ShowForLaunch(bool startInTray)
+    {
+        if (startInTray)
+        {
+            // Create the native handle and tray icon without showing or activating the window.
+            new WindowInteropHelper(this).EnsureHandle();
+            if (TrayIconVisible) { HideToTray(showNotification: false); return; }
+        }
+        Show();
+    }
     private void Repair_Click(object sender, RoutedEventArgs e)
     {
         if (busy || engine.Running) return;

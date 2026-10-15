@@ -4,12 +4,12 @@
 
 把 QQ音乐和真实麦克风混合成一个 Windows 虚拟麦克风，分享给游戏或语音频道。人声、音乐分别开关，本地耳机仍正常播放。
 
-**当前公开测试版：v0.3.1，适用于 Windows 11 x64。普通 Windows 10 19045 不支持本项目采用的进程音频捕获接口。**
+**当前公开测试版：v0.3.2，适用于 Windows 11 x64。普通 Windows 10 19045 不支持本项目采用的进程音频捕获接口。**
 
 ## 下载使用
 
-- **[下载 VoiceBridge.exe](https://github.com/zhangmingfeng962-cyber/VoiceBridge/releases/download/v0.3.1/VoiceBridge.exe)**
-- [版本说明、源码包和 SHA-256 校验值](https://github.com/zhangmingfeng962-cyber/VoiceBridge/releases/tag/v0.3.1)
+- **[下载 VoiceBridge.exe](https://github.com/zhangmingfeng962-cyber/VoiceBridge/releases/download/v0.3.2/VoiceBridge.exe)**
+- [版本说明、源码包和 SHA-256 校验值](https://github.com/zhangmingfeng962-cyber/VoiceBridge/releases/tag/v0.3.2)
 
 EXE 自带 .NET 运行时，可直接放到桌面双击。首次仍需安装虚拟音频设备：应用内附带 **VB-Audio 官方 VB-CABLE 原包**，点击安装入口后，由用户批准管理员授权并按原厂提示完成安装、重启。已安装 VB-CABLE 时无需重装。
 
@@ -31,6 +31,7 @@ VB-CABLE 是原作者的 donationware，保留其独立许可和捐赠方式。V
 - **独立人声和音乐开关 / 音量**：人声 0–200%，音乐 0–100%，开关使用平滑过渡。
 - **固定音乐增益**：人声过载时只对人声削峰，避免把音乐一起压低；混音预留固定余量。
 - **系统托盘**：关闭或最小化窗口后继续运行，左键恢复，右键控制声音、音量、全部停止或退出。
+- **开机自启动开关**：主界面上方一键开启 / 关闭；开启后随当前用户登录 Windows 启动并收起到托盘，人声和音乐仍默认关闭。
 - **全局快捷键**：游戏中也可通过已注册的快捷键控制。
 - **单文件发布**：运行时、图标、许可和官方组件包都内置于 EXE。
 - **本地诊断**：导出设备和路由信息；默认不保存录音，不上传声音。
@@ -42,6 +43,14 @@ VB-CABLE 是原作者的 donationware，保留其独立许可和捐赠方式。V
 | Ctrl + Alt + ↑ / ↓ | 音乐音量 ±5% |
 
 右上角 **×** 会收起到托盘。完全退出请右键托盘图标选择 **“退出程序”**。图标可能位于右下角“显示隐藏的图标”中。每次重新启动软件，两路声音都默认关闭。
+
+## 开机自启动
+
+先把 `VoiceBridge.exe` 放到桌面或其他固定位置，再点击主界面上方的 **“开机自启动：关”**，显示 **“开机自启动：开”** 即已登记。再次点击可关闭，设置立即保存，不需要管理员权限。登录 Windows 后程序只出现在托盘，左键图标或再次双击 EXE 可显示主窗口；如果托盘创建失败，会显示窗口，避免程序藏起后无法操作。
+
+自启动只登记当前用户的 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\VoiceBridge`，不会自动开启人声或音乐，也不会自动安装驱动。退出程序不会取消已开启的自启动。
+
+更新时完全退出旧版，将新版 EXE 覆盖到同一路径即可。移动或改名后，请在新位置重新打开，关闭再开启此开关以更新路径；如果按钮旁提示路径改变，也按此操作。若 Windows 曾禁用启动项，请在 **设置 → 应用 → 启动** 中允许 VoiceBridge；Windows 可能延后运行启动项。删除 EXE 前请先关闭自启动。
 
 ## 音量变小、音乐失真或断续
 
