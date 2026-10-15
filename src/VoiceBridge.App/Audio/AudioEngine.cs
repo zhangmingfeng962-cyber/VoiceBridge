@@ -26,8 +26,9 @@ public sealed class AudioEngine : IDisposable
     public long MicDropped => micInput?.Queue.DroppedSamples ?? 0;
     public long MicMissing => micInput?.Queue.MissingSamples ?? 0;
 
-    public async Task StartAsync(string micId, string cableId, float micGain, float musicGain, bool microphoneEnabled = true, bool musicEnabled = false)
+    public async Task StartAsync(string micId, string cableId, float micGain, float musicGain, bool microphoneEnabled = true, bool musicEnabled = false, string musicPlayerId = MusicPlayers.QQMusicId)
     {
+        var player = MusicPlayers.Get(musicPlayerId);
         await lifecycle.WaitAsync();
         try
         {
@@ -56,8 +57,8 @@ public sealed class AudioEngine : IDisposable
             Running = true;
             cancellation = new CancellationTokenSource();
             var token = cancellation.Token;
-            discovery = Task.Run(() => WatchAsync(micId, cableId, token));
-            Log.Write($"Audio engine started, 48000 Hz stereo float mix; voice={microphoneEnabled}; music={musicEnabled}; fixed headroom, no music ducking.");
+            discovery = Task.Run(() => WatchAsync(micId, cableId, player, token));
+            Log.Write($"Audio engine started, 48000 Hz stereo float mix; player={player.Id}; voice={microphoneEnabled}; music={musicEnabled}; fixed headroom, no music ducking.");
         }
         catch { Cleanup(); throw; }
         finally { lifecycle.Release(); }
@@ -72,7 +73,7 @@ public sealed class AudioEngine : IDisposable
         if (Mixer is not null) Mixer.MusicEnabled = false;
         Log.Write(ex.ToString());
     }
-    private async Task WatchAsync(string micId, string cableId, CancellationToken token)
+    private async Task WatchAsync(string micId, string cableId, MusicPlayer player, CancellationToken token)
     {
         try
         {
@@ -88,7 +89,7 @@ public sealed class AudioEngine : IDisposable
                 using (var currentCable = monitorEnumerator.GetDevice(cableId)) AudioDevices.CheckForeignSessions(currentCable);
                 if (monitorMic.State != DeviceState.Active || monitorCable.State != DeviceState.Active)
                     throw new InvalidOperationException("音频设备已断开或禁用。请重新选择设备并启动。");
-                var roots = QQMusicFinder.Roots();
+                var roots = MusicProcessFinder.Roots(player.Id);
                 foreach (var pid in captures.Keys.Where(pid => !roots.Contains(pid)).ToArray())
                 {
                     var removed = captures[pid]; captures.Remove(pid);
@@ -104,8 +105,8 @@ public sealed class AudioEngine : IDisposable
                     music.Replace(captures.Values.Select(c => c.Queue));
                 }
                 foreach (var capture in captures.Values)
-                    if (capture.Failure is not null) throw new InvalidOperationException("QQ音乐捕获中断，请重新启动混音。", capture.Failure);
-                Volatile.Write(ref musicStatus, roots.Length == 0 ? "等待 QQ音乐 · 麦克风可正常传输" : $"已连接 QQMusic · {roots.Length} 个进程树");
+                    if (capture.Failure is not null) throw new InvalidOperationException($"{player.Name}捕获中断，请重新启动混音。", capture.Failure);
+                Volatile.Write(ref musicStatus, roots.Length == 0 ? $"等待{player.Name} · 麦克风可正常传输" : $"已连接{player.Name} · {roots.Length} 个进程树");
                 await Task.Delay(1000, token);
             }
         }

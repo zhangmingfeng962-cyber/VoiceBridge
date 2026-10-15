@@ -2,7 +2,7 @@ using Forms = System.Windows.Forms;
 
 namespace VoiceBridge.App.Platform;
 
-public sealed record TrayState(bool MicrophoneOn, bool MusicOn, int MusicVolume, bool CanChange, bool Running, bool Busy);
+public sealed record TrayState(bool MicrophoneOn, bool MusicOn, int MusicVolume, bool CanChange, bool Running, bool Busy, string MusicPlayerName = "QQ音乐");
 
 public sealed class TrayController : IDisposable
 {
@@ -42,14 +42,14 @@ public sealed class TrayController : IDisposable
         if (disposed) return;
         var state = getState();
         microphone.Text = state.MicrophoneOn ? "人声：开" : "人声：关";
-        music.Text = state.MusicOn ? "音乐：开" : "音乐：关";
+        music.Text = state.MusicOn ? $"{state.MusicPlayerName}：开" : $"{state.MusicPlayerName}：关";
         microphone.Checked = state.MicrophoneOn;
         music.Checked = state.MusicOn;
         microphone.Enabled = music.Enabled = state.CanChange;
         volumeUp.Enabled = !state.Busy && state.MusicVolume < 100;
         volumeDown.Enabled = !state.Busy && state.MusicVolume > 0;
         stop.Enabled = !state.Busy && state.Running;
-        icon.Text = $"VoiceBridge · 人声{(state.MicrophoneOn ? "开" : "关")} · 音乐{(state.MusicOn ? "开" : "关")} · {state.MusicVolume}%";
+        icon.Text = $"VoiceBridge · 人声{(state.MicrophoneOn ? "开" : "关")} · {state.MusicPlayerName}{(state.MusicOn ? "开" : "关")} · {state.MusicVolume}%";
     }
 
     public void ExplainMinimize()

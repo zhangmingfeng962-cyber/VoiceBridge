@@ -41,6 +41,30 @@ public sealed class WindowTests
     }
 
     [Fact]
+    public async Task PlayerSelectorRestoresSelectionAndSwitchesLabelsWithoutStartingAudio() => await OnSta(() =>
+    {
+        var settings = new Settings { MusicPlayerId = "kugou" };
+        var window = new MainWindow(persistSettingsOnClose: false, enableTray: false,
+            showTrayNotifications: false, initialSettings: settings);
+        try
+        {
+            var selector = (System.Windows.Controls.ComboBox)window.FindName("MusicPlayerBox");
+            var status = (System.Windows.Controls.TextBlock)window.FindName("ProcessText");
+            Assert.Equal(new[] { "QQ音乐", "网易云音乐", "酷狗音乐" }, selector.Items.Cast<MusicPlayer>().Select(p => p.Name));
+            Assert.Equal("kugou", ((MusicPlayer)selector.SelectedItem).Id);
+            foreach (var player in MusicPlayers.All)
+            {
+                selector.SelectedItem = player;
+                Assert.Equal(player.Id, settings.MusicPlayerId);
+                Assert.Contains(player.Name, status.Text);
+                Assert.Equal("人声：关", ((System.Windows.Controls.Button)window.FindName("MicrophoneButton")).Content);
+                Assert.Equal("音乐：关", ((System.Windows.Controls.Button)window.FindName("ShareButton")).Content);
+            }
+        }
+        finally { ExitAndPump(window); }
+    });
+
+    [Fact]
     public async Task StartupLaunchCreatesTrayWithoutShowingWindowAndCanRestore() => await OnSta(() =>
     {
         var window = CreateTrayWindow();

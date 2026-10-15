@@ -9,7 +9,15 @@ public static class UiPreview
     public static void Write(string path)
     {
         // Render the actual WPF visual tree without opening a window or capturing the desktop.
-        var window = new MainWindow();
+        var window = new MainWindow(persistSettingsOnClose: false, enableTray: false,
+            showTrayNotifications: false, initialSettings: new Settings { MusicPlayerId = MusicPlayers.NetEase.Id });
+        var microphone = (System.Windows.Controls.ComboBox)window.FindName("MicrophoneBox");
+        microphone.ItemsSource = new[] { new Audio.DeviceChoice("preview-microphone", "示例：真实麦克风") };
+        microphone.SelectedIndex = 0;
+        var cable = (System.Windows.Controls.ComboBox)window.FindName("CableBox");
+        cable.ItemsSource = new[] { new Audio.DeviceChoice("preview-cable", "CABLE Input (VB-Audio Virtual Cable)") };
+        cable.SelectedIndex = 0;
+        ((System.Windows.Controls.TextBlock)window.FindName("StatusText")).Text = "界面预览 · 选择播放器后，分别开启需要的人声和音乐。";
         var content = (System.Windows.Controls.ScrollViewer)window.Content;
         content.Background = window.Background;
         content.Measure(new Size(850, 920));

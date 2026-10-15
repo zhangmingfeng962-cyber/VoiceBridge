@@ -6,7 +6,7 @@ using NAudio.CoreAudioApi;
 namespace VoiceBridge.App.Platform;
 public static class Diagnostics
 {
-    public static void Write(string path)
+    public static void Write(string path, string? musicPlayerId = null)
     {
         using var e = new MMDeviceEnumerator();
         List<object> endpoints = [];
@@ -24,6 +24,8 @@ public static class Diagnostics
             ProcessLoopbackSupported = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 20348),
             WindowsCommunicationDucking = WindowsAudioPreferences.DuckingPreference,
             Endpoints = endpoints, Defaults = defaults, QQMusicRoots = QQMusicFinder.Roots(),
+            SelectedMusicPlayer = MusicPlayers.GetOrDefault(musicPlayerId ?? Settings.Load().MusicPlayerId),
+            MusicSources = MusicPlayers.All.Select(player => new { player.Id, player.Name, RootProcessIds = MusicProcessFinder.Roots(player.Id) }).ToArray(),
             Note = "仅设备诊断，不采集声音；不代表端到端验证通过。"
         }, new JsonSerializerOptions { WriteIndented = true }));
     }

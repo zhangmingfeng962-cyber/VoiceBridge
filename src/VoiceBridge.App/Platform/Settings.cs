@@ -8,6 +8,7 @@ public sealed class Settings
     public string? CableId { get; set; }
     public double MicrophoneVolume { get; set; } = 100;
     public double MusicVolume { get; set; } = 35;
+    public string MusicPlayerId { get; set; } = MusicPlayers.QQMusicId;
     // Deliberately do not persist music enable or auto-start microphone capture.
     public static string Folder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VoiceBridge");
     public static Settings Load()
@@ -17,6 +18,7 @@ public sealed class Settings
             var s = JsonSerializer.Deserialize<Settings>(File.ReadAllText(Path.Combine(Folder, "settings.json"))) ?? new();
             s.MicrophoneVolume = double.IsFinite(s.MicrophoneVolume) ? Math.Clamp(s.MicrophoneVolume, 0, 200) : 100;
             s.MusicVolume = double.IsFinite(s.MusicVolume) ? Math.Clamp(s.MusicVolume, 0, 100) : 35;
+            s.MusicPlayerId = MusicPlayers.GetOrDefault(s.MusicPlayerId).Id;
             return s;
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return new(); }

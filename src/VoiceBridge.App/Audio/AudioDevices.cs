@@ -42,7 +42,7 @@ public static class AudioDevices
             using var session = sessions[i];
             if (session.State == NAudio.CoreAudioApi.Interfaces.AudioSessionState.AudioSessionStateActive &&
                 session.GetProcessID != (uint)Environment.ProcessId)
-                throw new InvalidOperationException("检测到其他程序正在向 VB-CABLE 输出。请将 QQ音乐、游戏和语音软件的播放输出都设置为耳机，再重新启动混音。");
+                throw new InvalidOperationException("检测到其他程序正在向 VB-CABLE 输出。请将音乐播放器、游戏和语音软件的播放输出都设置为耳机，再重新启动混音。");
         }
     }
 }

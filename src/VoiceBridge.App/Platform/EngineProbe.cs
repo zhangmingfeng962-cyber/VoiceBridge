@@ -28,7 +28,7 @@ public static class EngineProbe
         object? report = null;
         try
         {
-            await engine.StartAsync(mic.Id, cable.Id, 1, .35f);
+            await engine.StartAsync(mic.Id, cable.Id, 1, .35f, musicPlayerId: settings.MusicPlayerId);
             await Task.Delay(2200);
             if (engine.Failure is not null) throw engine.Failure;
             report = new
@@ -38,7 +38,8 @@ public static class EngineProbe
                 Started = engine.Running,
                 Microphone = mic.Name,
                 Cable = cable.Name,
-                QQMusic = engine.MusicStatus,
+                MusicPlayer = settings.MusicPlayerId,
+                MusicSource = engine.MusicStatus,
                 MusicShared = engine.Mixer?.MusicEnabled,
                 MicrophoneShared = engine.Mixer?.MicrophoneEnabled,
                 MicPeak = engine.Mixer?.MicPeak,

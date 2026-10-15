@@ -21,7 +21,7 @@ public sealed class ProcessLoopback : IDisposable
     public ProcessLoopback(uint processId)
     {
         ProcessId = processId;
-        thread = new Thread(Run) { Name = $"QQMusic capture {processId}", IsBackground = true };
+        thread = new Thread(Run) { Name = $"Music capture {processId}", IsBackground = true };
         thread.SetApartmentState(ApartmentState.MTA);
     }
     public async Task StartAsync()
