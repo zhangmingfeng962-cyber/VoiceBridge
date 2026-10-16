@@ -19,8 +19,8 @@ jobs:
         run: |
           import hashlib, pathlib, shutil, subprocess, sys, tempfile, zipfile
           root = pathlib.Path.cwd().resolve()
-          archive = root / 'VoiceBridge-v0.6.0-source.zip'
-          expected = '24eab26dad6540b0cfc75f14d470c09fc0a753ea16d81801823c40b24f922eb0'
+          archive = root / 'VoiceBridge-v0.7.0-source.zip'
+          expected = '6a3dcd32f7efb94934198d2bbe0988df62605e3484d9bbd4b269949d3b017e74'
           actual = hashlib.sha256(archive.read_bytes()).hexdigest()
           if actual != expected:
               raise RuntimeError('The source archive checksum does not match the reviewed release.')
@@ -28,7 +28,7 @@ jobs:
           if marker.is_file() and marker.read_text().strip() == expected:
               print('This verified source was already imported; preserving subsequent edits.')
               sys.exit(0)
-          allowed = {'.gitattributes', '.gitignore', 'CHANGELOG.md', 'Directory.Build.props', 'global.json', 'LICENSE', 'README.md', 'README.zh-CN.md', 'VoiceBridge.sln', 'src', 'tests', 'scripts', 'third-party', 'docs'}
+          allowed = {'.gitattributes', '.gitignore', 'CHANGELOG.md', 'Directory.Build.props', 'global.json', 'LICENSE', 'README.md', 'README.zh-CN.md', 'VoiceBridge.sln', 'src', 'tests', 'scripts', 'third-party', 'docs', 'relay'}
           with tempfile.TemporaryDirectory() as temporary:
               unpacked = pathlib.Path(temporary).resolve()
               with zipfile.ZipFile(archive) as source_zip:
@@ -56,6 +56,6 @@ jobs:
           subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], check=True)
           subprocess.run(['git', 'add', '--all'], check=True)
           if subprocess.run(['git', 'diff', '--cached', '--quiet']).returncode:
-              subprocess.run(['git', 'commit', '-m', 'Add independent music links and browser receiver in v0.6.0'], check=True)
+              subprocess.run(['git', 'commit', '-m', 'Add outbound HTTPS music relay development source'], check=True)
               subprocess.run(['git', 'push', 'origin', 'HEAD:main'], check=True)
           print(f'Imported {count} reviewed source files.')
