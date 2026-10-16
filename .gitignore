@@ -15,3 +15,5 @@ settings.json
 *diagnostics*.json
 audio-routes-before-*.json
 ducking-before-*.json
+relay-profile*.json
+*.vbrelay

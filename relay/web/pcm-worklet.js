@@ -2,14 +2,14 @@
 class VoiceBridgePcm extends AudioWorkletProcessor {
   constructor(options) {
     super();
-    this.capacity = 192000; this.left = new Float32Array(this.capacity); this.right = new Float32Array(this.capacity);
+    this.capacity = 384000; this.left = new Float32Array(this.capacity); this.right = new Float32Array(this.capacity);
     this.read = 0; this.write = 0; this.size = 0; this.fraction = 0; this.playing = false; this.fade = 0;
-    this.target = 48000 * (options.processorOptions.bufferMs || 1200) / 1000;
+    this.target = 48000 * (options.processorOptions.bufferMs || 2400) / 1000;
     this.underruns = this.gaps = this.resets = this.report = 0; this.sequence = null;
     this.port.onmessage = event => {
       const message = event.data;
       if (message.type === "reset") { this.clear(); this.sequence = null; }
-      else if (message.type === "configure") { this.target = 48000 * Math.max(600, Math.min(2400, Number(message.bufferMs))) / 1000; this.clear(); }
+      else if (message.type === "configure") { this.target = 48000 * Math.max(1200, Math.min(4800, Number(message.bufferMs))) / 1000; this.clear(); }
       else if (message.type === "packet") this.packet(message.data);
     };
   }
@@ -21,8 +21,12 @@ class VoiceBridgePcm extends AudioWorkletProcessor {
     const sequence = view.getUint32(4, true);
     if (this.sequence !== null && sequence !== ((this.sequence + 1) >>> 0)) { this.gaps++; this.clear(); }
     this.sequence = sequence;
-    // Limit real latency even when a backgrounded browser receives a stale TCP burst.
-    if (this.size + 480 > this.target + 24000) { this.resets++; this.clear(); }
+    // Allow normal WAN bursts. When truly stale, retain a playable live buffer instead of
+    // clearing all audio and forcing another silent prebuffer interval.
+    if (this.size + 480 > Math.min(this.capacity - 480, this.target + 96000)) {
+      this.resets++;const discard=Math.max(0,this.size-this.target);
+      this.read=(this.read+discard)%this.capacity;this.size-=discard;this.fraction=0;this.fade=0;
+    }
     for (let i = 0; i < 480; i++) {
       const l = view.getFloat32(16 + i * 8, true), r = view.getFloat32(20 + i * 8, true);
       this.left[this.write] = Number.isFinite(l) ? Math.max(-1, Math.min(1, l)) : 0;

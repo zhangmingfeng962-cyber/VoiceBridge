@@ -4,12 +4,12 @@
 
 把 QQ音乐、网易云音乐或酷狗音乐分享给朋友：可通过虚拟麦克风与人声混合，也可让朋友用独立链接收听音乐，继续在 QQ、微信或游戏里交流。本地耳机仍正常播放。
 
-**当前公开测试版：v0.6.0，适用于 Windows 11 x64。普通 Windows 10 19045 不支持本项目采用的进程音频捕获接口。**
+**当前公开测试版：v0.7.0，适用于 Windows 11 x64。普通 Windows 10 19045 不支持本项目采用的进程音频捕获接口。**
 
 ## 下载使用
 
-- **[下载 VoiceBridge.exe](https://github.com/zhangmingfeng962-cyber/VoiceBridge/releases/download/v0.6.0/VoiceBridge.exe)**
-- [版本说明、源码包和 SHA-256 校验值](https://github.com/zhangmingfeng962-cyber/VoiceBridge/releases/tag/v0.6.0)
+- **[下载 VoiceBridge.exe](https://github.com/zhangmingfeng962-cyber/VoiceBridge/releases/download/v0.7.0/VoiceBridge.exe)**
+- [版本说明、源码包和 SHA-256 校验值](https://github.com/zhangmingfeng962-cyber/VoiceBridge/releases/tag/v0.7.0)
 
 EXE 自带 .NET / ASP.NET Core 运行时，可直接放到桌面双击。**只使用独立音乐链接时无需虚拟声卡或麦克风。** 原来的虚拟麦克风功能仍需安装设备：应用内附带 **VB-Audio 官方 VB-CABLE 原包**，由用户批准管理员授权并按原厂提示完成安装、重启。已安装 VB-CABLE 时无需重装。
 
@@ -19,9 +19,11 @@ VB-CABLE 是原作者的 donationware，保留其独立许可和捐赠方式。V
 
 在界面上方选择播放器，点击“开始独立分享”，等互联网链接检查通过后复制给朋友。对方用新版 Edge / Chrome 打开并点击“开始收听”，不用安装接收软件或开启麦克风。人声继续通过原来的 QQ、微信或游戏交流。
 
-音乐以 48 kHz 双声道未压缩 PCM 传输，不进入目标平台的语音过滤；接收页提供音量、120 / 240 / 480 ms 缓冲和断线重连。临时互联网链接依赖 Cloudflare 测试服务，首次下载约 53 MB 官方组件并校验；每人约需 3.1 Mbps 上行。**不保证临时服务可用、零断流或 <100 ms 总延迟。** 音频经 Cloudflare 转发，不是端到端加密。
+配置自己的 HTTPS 中继后，音乐以 48 kHz 双声道未压缩 PCM 加密上传一次，再由服务器分发给朋友，不进入 QQ、微信或游戏的语音过滤。朋友无需账号或安装接收软件；完整链接包含本次解密 / 收听密钥。默认接收缓冲 2.4 秒，可选 1.2 / 2.4 / 4.8 秒。为保留音乐而增加了延迟，**不满足端到端 <100 ms，也不保证零断流或所有设备听感完全一致**。
 
-关闭 / 最小化后继续分享；专用停止按钮、全部停止或托盘退出会断开链接，每次重新开始生成新密钥。详见 [独立音乐分享教程与固定 HTTPS 接入](docs/MUSIC-LINK.md)。
+接收端通过服务器等待新片段，减少后台浏览器计时器造成的抖动；遇到严重过期队列时保留可播放缓冲。发送凭据用 Windows DPAPI 保存在本机，不包含在公共 EXE / 源码中。公共下载不附带本账户的发送权限，其他分享者需部署和配置自己的服务。部署方法与免费限制见 [HTTPS 跨网音乐](docs/HTTPS-RELAY.md) 和 [中继服务代码](relay/README.md)。
+
+关闭 / 最小化后继续分享；停止会请求撤销，断网时房间最迟在最后上传 120 秒后过期，每次重新开始生成新密钥。免费托管可能休眠、限流或重启；首次唤醒可能需要约一分钟。原临时反向隧道作为兼容路径保留，说明见 [旧链接方式](docs/MUSIC-LINK.md)。
 
 ## 虚拟麦克风快速开始
 

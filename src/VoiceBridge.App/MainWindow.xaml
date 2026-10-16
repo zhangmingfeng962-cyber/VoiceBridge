@@ -18,7 +18,7 @@
      <ComboBox x:Name="BroadcastPlayerBox" AutomationProperties.Name="独立分享音乐来源" Margin="0,0,0,8"/>
      <CheckBox x:Name="BroadcastSeparateCheck" IsChecked="True" Content="开始时关闭下方语音频道的音乐，避免重复听到" Foreground="#D6E0EF" Margin="0,6,0,8"/>
      <CheckBox x:Name="BroadcastQuickCheck" IsChecked="True" Content="创建临时互联网链接（测试服务，无账号）" Foreground="#D6E0EF" Margin="0,0,0,8"/>
-     <TextBlock Text="已配置中继时只需 HTTPS 出站连接，朋友无需账号。音乐在本机加密，接收端解密；中继只暂存加密片段。默认约 1.2 秒接收缓冲，实际延迟还取决于网络。没有中继配置时仍可尝试原临时链接。" Foreground="#ADCCC4" FontSize="12" TextWrapping="Wrap"/>
+     <TextBlock Text="已配置中继时只需 HTTPS 出站连接，朋友无需账号。音乐在本机加密，接收端解密；中继只暂存加密片段。默认约 2.4 秒接收缓冲，实际延迟还取决于网络。没有中继配置时仍可尝试原临时链接。" Foreground="#ADCCC4" FontSize="12" TextWrapping="Wrap"/>
      <WrapPanel Margin="0,8,0,0"><Button x:Name="BroadcastStartButton" Content="开始独立分享" Click="BroadcastStart_Click" Background="#237B65"/><Button x:Name="BroadcastStopButton" Content="停止独立分享" Click="BroadcastStop_Click"/><Button x:Name="BroadcastCopyButton" Content="复制朋友收听链接" Click="BroadcastCopy_Click"/><Button x:Name="BroadcastPreviewButton" Content="本机试听" Click="BroadcastPreview_Click"/></WrapPanel>
      <TextBox x:Name="BroadcastLinkBox" IsReadOnly="True" Text="尚未创建链接" AutomationProperties.Name="音乐收听链接" Margin="0,8,0,0" Padding="8" Background="#102621" Foreground="#D6E0EF" BorderBrush="#30665A" TextWrapping="Wrap"/>
      <TextBlock x:Name="BroadcastStatusText" Text="独立分享尚未开始。原有语音功能仍可单独使用。" Foreground="#ADCCC4" TextWrapping="Wrap" Margin="0,8,0,0"/>
