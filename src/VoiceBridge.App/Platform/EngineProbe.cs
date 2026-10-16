@@ -28,13 +28,18 @@ public static class EngineProbe
         object? report = null;
         try
         {
-            await engine.StartAsync(mic.Id, cable.Id, 1, .35f, musicPlayerId: settings.MusicPlayerId);
+            var profile = settings.GetScenario(settings.ScenarioId);
+            await engine.StartAsync(mic.Id, cable.Id, 1, .35f, musicPlayerId: settings.MusicPlayerId,
+                channelMode: profile.ChannelMode, outputBufferMs: profile.OutputBufferMs);
             await Task.Delay(2200);
             if (engine.Failure is not null) throw engine.Failure;
             report = new
             {
                 Timestamp = DateTimeOffset.Now,
                 Version = BuildInfo.Version,
+                Scenario = settings.ScenarioId,
+                profile.ChannelMode,
+                profile.OutputBufferMs,
                 Started = engine.Running,
                 Microphone = mic.Name,
                 Cable = cable.Name,

@@ -35,8 +35,7 @@ public partial class MainWindow : Window
         this.showTrayNotifications = showTrayNotifications;
         startup = startupRegistration ?? new StartupRegistration();
         InitializeComponent();
-        MusicPlayerBox.ItemsSource = MusicPlayers.All;
-        MusicPlayerBox.SelectedItem = MusicPlayers.GetOrDefault(settings.MusicPlayerId);
+        InitializeScenarios();
         UpdateStartupControl();
         Activated += (_, _) => UpdateStartupControl();
         MicSlider.Value = settings.MicrophoneVolume; MusicSlider.Value = settings.MusicVolume;
@@ -90,7 +89,7 @@ public partial class MainWindow : Window
             }
         }
         catch (Exception ex) { Report(ex); }
-        UpdateControls();
+        CaptureScenarioControls(); ReadDefaultInputStatus(); UpdateControls();
     }
     private async void Start_Click(object sender, RoutedEventArgs e)
     {
@@ -102,12 +101,13 @@ public partial class MainWindow : Window
         busy = true; UpdateControls();
         try
         {
-            if (!microphoneOn && !musicOn) await engine.StopAsync();
+            if (!microphoneOn && !musicOn) { CancelLocalOperation(); await engine.StopAsync(); }
             else if (!engine.Running)
             {
                 if (MicrophoneBox.SelectedItem is not DeviceChoice mic || CableBox.SelectedItem is not DeviceChoice cable)
                     throw new InvalidOperationException("请先选择真实麦克风和 CABLE Input。");
-                await engine.StartAsync(mic.Id, cable.Id, (float)MicSlider.Value / 100, (float)MusicSlider.Value / 100, microphoneOn, musicOn, SelectedMusicPlayer.Id);
+                CaptureScenarioControls();
+                await engine.StartAsync(mic.Id, cable.Id, (float)MicSlider.Value / 100, (float)MusicSlider.Value / 100, microphoneOn, musicOn, SelectedMusicPlayer.Id, CurrentScenario.ChannelMode, CurrentScenario.OutputBufferMs);
             }
             else if (engine.Mixer is { } mixer) { mixer.MicrophoneEnabled = microphoneOn; mixer.MusicEnabled = musicOn; }
             sendingMicrophone = microphoneOn; sendingMusic = musicOn;
@@ -138,6 +138,8 @@ public partial class MainWindow : Window
         MicrophoneButton.Background = new System.Windows.Media.SolidColorBrush(sendingMicrophone ? System.Windows.Media.Color.FromRgb(42, 108, 160) : System.Windows.Media.Color.FromRgb(48, 68, 92));
         ShareButton.Background = new System.Windows.Media.SolidColorBrush(sendingMusic ? System.Windows.Media.Color.FromRgb(27, 119, 94) : System.Windows.Media.Color.FromRgb(36, 67, 63));
         MicrophoneBox.IsEnabled = CableBox.IsEnabled = MusicPlayerBox.IsEnabled = RefreshButton.IsEnabled = RepairButton.IsEnabled = InstallButton.IsEnabled = !engine.Running && !busy;
+        ScenarioBox.IsEnabled = ChannelModeBox.IsEnabled = BufferBox.IsEnabled = !engine.Running && !busy && !localOperation && !closing;
+        UpdateScenarioStatus();
         tray?.Update();
         QueueExitIfReady();
     }
@@ -149,7 +151,7 @@ public partial class MainWindow : Window
         else if (id == 4) await SetSourcesAsync(!sendingMicrophone, sendingMusic);
         else MusicSlider.Value = Math.Clamp(MusicSlider.Value + (id == 2 ? 5 : -5), 0, 100);
     }
-    private void Volume_Changed(object sender, RoutedPropertyChangedEventArgs<double> e) { if (IsInitialized) UpdateVolumes(); }
+    private void Volume_Changed(object sender, RoutedPropertyChangedEventArgs<double> e) { if (IsInitialized) { UpdateVolumes(); CaptureScenarioControls(); UpdateScenarioStatus(); } }
     private void UpdateVolumes()
     {
         MicValue.Text = $"{MicSlider.Value:0}%"; MusicValue.Text = $"{MusicSlider.Value:0}%";
@@ -170,6 +172,11 @@ public partial class MainWindow : Window
             try { var player = SelectedMusicPlayer; var roots = MusicProcessFinder.Roots(player.Id); ProcessText.Text = roots.Length == 0 ? $"等待{player.Name} · 打开后自动识别" : $"已发现{player.Name} · {roots.Length} 个进程树"; }
             catch (Exception ex) { Log.Write(ex.Message); }
         }
+        if (tick % 10 == 0)
+        {
+            var stats = engine.MusicStatistics();
+            CaptureTelemetryText.Text = !engine.Running ? "捕获统计：未启动。" : $"音乐捕获：{stats.Sources} 个进程树 · 本次缺样补零 {stats.MissingMilliseconds:F1} ms · 丢弃 {stats.DroppedMilliseconds:F1} ms · 原生不连续 {stats.Discontinuities} 次。启动和暂停也可能影响计数，不能直接当作平台过滤。";
+        }
         if (engine.Running && engine.Failure is { } failure)
         {
             busy = true; UpdateControls();
@@ -189,6 +196,7 @@ public partial class MainWindow : Window
         settings.MusicPlayerId = player.Id;
         ProcessText.Text = $"自动识别{player.Name} · 等待播放器状态";
         tray?.Update();
+        CaptureScenarioControls(); UpdateScenarioStatus();
     }
     private TrayState GetTrayState() => new(sendingMicrophone, sendingMusic, (int)MusicSlider.Value, !closing && MicrophoneButton.IsEnabled, engine.Running, busy || closing, SelectedMusicPlayer.Name);
     private void SaveSettings()
@@ -196,6 +204,7 @@ public partial class MainWindow : Window
         if (!persistSettingsOnClose) return;
         try
         {
+            CaptureScenarioControls();
             settings.MicrophoneId = (MicrophoneBox.SelectedItem as DeviceChoice)?.Id;
             settings.CableId = (CableBox.SelectedItem as DeviceChoice)?.Id;
             settings.MicrophoneVolume = MicSlider.Value; settings.MusicVolume = MusicSlider.Value;
@@ -226,11 +235,12 @@ public partial class MainWindow : Window
     public void RequestExit()
     {
         if (closing || canClose) return;
+        CancelLocalOperation();
         exitRequested = true;
         if (busy) StatusText.Text = "正在完成当前操作，完成后退出。";
         QueueExitIfReady();
     }
-    public void AllowSystemShutdown() { systemShutdown = true; }
+    public void AllowSystemShutdown() { systemShutdown = true; CancelLocalOperation(); }
     private void QueueExitIfReady()
     {
         if (!exitRequested || busy || closing || canClose || exitQueued) return;
@@ -316,7 +326,7 @@ public partial class MainWindow : Window
     {
         var dialog = new SaveFileDialog { FileName = "VoiceBridge-diagnostics.json", Filter = "JSON|*.json" };
         if (dialog.ShowDialog(this) != true) return;
-        try { Diagnostics.Write(dialog.FileName, SelectedMusicPlayer.Id); StatusText.Text = "设备诊断已导出；文件不包含录音。"; } catch (Exception ex) { Report(ex); }
+        try { CaptureScenarioControls(); Diagnostics.Write(dialog.FileName, SelectedMusicPlayer.Id, settings.ScenarioId, CurrentScenario, engine.MusicStatistics()); StatusText.Text = "设备诊断已导出；文件不包含录音。"; } catch (Exception ex) { Report(ex); }
     }
     private async void Install_Click(object sender, RoutedEventArgs e)
     {
@@ -347,6 +357,8 @@ public partial class MainWindow : Window
         catch (Exception ex) { Log.Write(ex.ToString()); }
         finally
         {
+            CancelLocalOperation();
+            if (localTask is { } pending) { try { await pending; } catch (Exception ex) { Log.Write(ex.ToString()); } }
             try { await engine.StopAsync(); }
             catch (Exception ex) { Log.Write(ex.ToString()); }
             canClose = true;

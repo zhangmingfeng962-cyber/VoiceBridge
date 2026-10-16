@@ -12,6 +12,12 @@ public sealed class MixBus : IFloatSource
     private volatile bool musicEnabled;
     private volatile bool microphoneEnabled = true;
     private float micPeak, musicPeak, outputPeak, reduction;
+    private int channelMode;
+    public MusicChannelMode ChannelMode
+    {
+        get => (MusicChannelMode)Volatile.Read(ref channelMode);
+        set { if (!Enum.IsDefined(value)) throw new ArgumentOutOfRangeException(nameof(value)); Volatile.Write(ref channelMode, (int)value); }
+    }
     public float MicGain { get => Volatile.Read(ref micTarget); set => Volatile.Write(ref micTarget, SafeGain(value, 2)); }
     public float MusicGain { get => Volatile.Read(ref musicTarget); set => Volatile.Write(ref musicTarget, SafeGain(value, 1)); }
     public bool MusicEnabled { get => musicEnabled; set => musicEnabled = value; }
@@ -36,6 +42,7 @@ public sealed class MixBus : IFloatSource
         Array.Clear(musicBuffer, musicRead, count - musicRead);
         float mp = 0, qp = 0, op = 0;
         float mt = microphoneEnabled ? MicGain : 0, qt = musicEnabled ? MusicGain : 0;
+        var channels = ChannelMode;
         const float release = .00026f; // about 80 ms to recover most gain
         for (int i = 0; i < count; i += 2)
         {
@@ -43,6 +50,10 @@ public sealed class MixBus : IFloatSource
             musicCurrent = Ramp(musicCurrent, qt);
             float ml = Finite(micBuffer[i]), mr = Finite(micBuffer[i + 1]);
             float ql = Finite(musicBuffer[i]), qr = Finite(musicBuffer[i + 1]);
+            // Channel adaptation affects only music; the physical microphone path stays unchanged.
+            if (channels == MusicChannelMode.MonoAverage) ql = qr = ql * .5f + qr * .5f;
+            else if (channels == MusicChannelMode.LeftOnly) qr = ql;
+            else if (channels == MusicChannelMode.RightOnly) ql = qr;
             mp = Math.Max(mp, Math.Max(Math.Abs(ml), Math.Abs(mr)));
             qp = Math.Max(qp, Math.Max(Math.Abs(ql), Math.Abs(qr)));
             // Fixed 6 dB headroom preserves the music waveform and its dynamics.

@@ -41,6 +41,35 @@ public sealed class WindowTests
     }
 
     [Fact]
+    public async Task ScenarioSwitchRestoresIndependentControlsWithoutStartingCapture() => await OnSta(() =>
+    {
+        var settings = new Settings();
+        var window = new MainWindow(false, enableTray: false, showTrayNotifications: false, initialSettings: settings);
+        try
+        {
+            var scenes = (System.Windows.Controls.ComboBox)window.FindName("ScenarioBox");
+            var player = (System.Windows.Controls.ComboBox)window.FindName("MusicPlayerBox");
+            var music = (System.Windows.Controls.Slider)window.FindName("MusicSlider");
+            var buffer = (System.Windows.Controls.ComboBox)window.FindName("BufferBox");
+            scenes.SelectedItem = Scenarios.Get("qq"); music.Value = 75; player.SelectedItem = MusicPlayers.KuGou;
+            buffer.SelectedItem = Scenarios.Buffers.First(x => x.Milliseconds == 40);
+            ((System.Windows.Controls.Button)window.FindName("ConfirmPeerButton")).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            Assert.True(settings.GetScenario("qq").HasMatchingPeerConfirmation);
+            scenes.SelectedItem = Scenarios.Get("wechat"); music.Value = 25; player.SelectedItem = MusicPlayers.NetEase;
+            buffer.SelectedItem = Scenarios.Buffers.First(x => x.Milliseconds == 60);
+            scenes.SelectedItem = Scenarios.Get("qq");
+            Assert.Equal(75, music.Value); Assert.Equal("kugou", ((MusicPlayer)player.SelectedItem).Id);
+            Assert.Equal(40, ((BufferChoice)buffer.SelectedItem).Milliseconds);
+            Assert.Equal(25, settings.GetScenario("wechat").MusicVolume);
+            Assert.True(settings.GetScenario("qq").HasMatchingPeerConfirmation);
+            music.Value = 70; Assert.False(settings.GetScenario("qq").HasMatchingPeerConfirmation);
+            Assert.False(((System.Windows.Controls.Button)window.FindName("LocalRecordButton")).IsEnabled);
+            Assert.Equal("音乐：关", ((System.Windows.Controls.Button)window.FindName("ShareButton")).Content);
+        }
+        finally { ExitAndPump(window); }
+    });
+
+    [Fact]
     public async Task PlayerSelectorRestoresSelectionAndSwitchesLabelsWithoutStartingAudio() => await OnSta(() =>
     {
         var settings = new Settings { MusicPlayerId = "kugou" };

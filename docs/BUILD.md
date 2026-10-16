@@ -28,6 +28,8 @@ v0.3.2 增加自启动登记 / 关闭、含空格与中文的命令行路径、E
 
 v0.4.0 增加三个播放器的进程根选择、大小写匹配、嵌套进程去重、相似进程名排除、无效来源拒绝、配置兼容及 WPF 来源选择测试。新来源的筛选测试使用进程快照样本，不等同于真实网易云 / 酷狗客户端播放验证；发布环境没有安装这两个客户端。
 
+v0.5.0 增加场景独立保存 / 迁移、参数签名与手动反馈失效、音乐声道处理、WAV 统计和默认输入恢复计划测试。Windows 默认输入状态在后台只读刷新。基础测试不改变真实默认输入、不录制真实声音、不启动平台通话；虚拟输入录制和耳机试听仍需通过用户明确点击的实机检查，各平台接收效果还需另行验收。
+
 这些短时、合成音和局部实机检查不代表所有用户设备、所有语音平台、长期负载或 <100 ms 已达标。仓库不包含开发者的设备报告、录音和个人路由备份。
 
 ## 音频测试
@@ -59,6 +61,7 @@ Remove-Item Env:\VOICEBRIDGE_FIXTURE
 .\VoiceBridge.exe --verify-bundle .\bundle-check.json
 .\VoiceBridge.exe --probe-tray .\tray-check.json
 .\VoiceBridge.exe --probe-capture-api .\capture-check.json
+.\VoiceBridge.exe --render-preview .\scenario-preview.png --expand-scenario
 ```
 
 `--probe-engine` 与上述检查不同：它会短时使用生产音频引擎和真实麦克风，仅适用于用户明确启用、虚拟线缆空闲的本地诊断；不要在通话期间执行。

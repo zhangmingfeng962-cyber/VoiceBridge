@@ -68,7 +68,7 @@ public partial class App : Application
         {
             var path = e.Args.SkipWhile(x => x != "--render-preview").Skip(1).FirstOrDefault();
             if (path is null) { Shutdown(2); return; }
-            try { UiPreview.Write(path); Shutdown(0); } catch (Exception ex) { Log.Write(ex.ToString()); Shutdown(1); }
+            try { UiPreview.Write(path, e.Args.Contains("--expand-scenario")); Shutdown(0); } catch (Exception ex) { Log.Write(ex.ToString()); Shutdown(1); }
             return;
         }
         if (e.Args.Contains("--diagnose"))

@@ -18,6 +18,7 @@ public sealed class AudioEngine : IDisposable
     private Task? discovery;
     private Exception? failure;
     private string musicStatus = "等待启动";
+    private ProcessLoopback[] telemetryCaptures = [];
     public MixBus? Mixer { get; private set; }
     public bool Running { get; private set; }
     public string MusicStatus => Volatile.Read(ref musicStatus);
@@ -25,9 +26,17 @@ public sealed class AudioEngine : IDisposable
     public double MicrophoneQueueMs => micInput?.Queue.BufferedMilliseconds ?? 0;
     public long MicDropped => micInput?.Queue.DroppedSamples ?? 0;
     public long MicMissing => micInput?.Queue.MissingSamples ?? 0;
-
-    public async Task StartAsync(string micId, string cableId, float micGain, float musicGain, bool microphoneEnabled = true, bool musicEnabled = false, string musicPlayerId = MusicPlayers.QQMusicId)
+    public CaptureStatistics MusicStatistics()
     {
+        var sources = Volatile.Read(ref telemetryCaptures);
+        return new(sources.Length, sources.Sum(x => x.Queue.MissingSamples) / 96.0,
+            sources.Sum(x => x.Queue.DroppedSamples) / 96.0, sources.Sum(x => Interlocked.Read(ref x.Discontinuities)));
+    }
+
+    public async Task StartAsync(string micId, string cableId, float micGain, float musicGain, bool microphoneEnabled = true, bool musicEnabled = false, string musicPlayerId = MusicPlayers.QQMusicId, MusicChannelMode channelMode = MusicChannelMode.Stereo, int outputBufferMs = 20)
+    {
+        if (!Enum.IsDefined(channelMode)) throw new ArgumentOutOfRangeException(nameof(channelMode));
+        if (outputBufferMs is not (20 or 40 or 60)) throw new ArgumentOutOfRangeException(nameof(outputBufferMs));
         var player = MusicPlayers.Get(musicPlayerId);
         await lifecycle.WaitAsync();
         try
@@ -46,10 +55,10 @@ public sealed class AudioEngine : IDisposable
             AudioDevices.CheckForeignSessions(cableDevice);
             microphone = new WasapiCapture(micDevice, true, 10);
             micInput = new CaptureInput(microphone.WaveFormat);
-            Mixer = new MixBus(micInput.Stereo, music) { MicGain = micGain, MusicGain = musicGain, MicrophoneEnabled = microphoneEnabled, MusicEnabled = musicEnabled };
+            Mixer = new MixBus(micInput.Stereo, music) { MicGain = micGain, MusicGain = musicGain, MicrophoneEnabled = microphoneEnabled, MusicEnabled = musicEnabled, ChannelMode = channelMode };
             microphone.DataAvailable += OnMicrophoneData;
             microphone.RecordingStopped += (_, args) => { if (args.Exception is not null) Fail(args.Exception); };
-            output = new WasapiOut(cableDevice, AudioClientShareMode.Shared, true, 20);
+            output = new WasapiOut(cableDevice, AudioClientShareMode.Shared, true, outputBufferMs);
             output.PlaybackStopped += (_, args) => { if (args.Exception is not null) Fail(args.Exception); };
             output.Init(new SampleAdapter(Mixer).ToWaveProvider());
             microphone.StartRecording();
@@ -58,7 +67,7 @@ public sealed class AudioEngine : IDisposable
             cancellation = new CancellationTokenSource();
             var token = cancellation.Token;
             discovery = Task.Run(() => WatchAsync(micId, cableId, player, token));
-            Log.Write($"Audio engine started, 48000 Hz stereo float mix; player={player.Id}; voice={microphoneEnabled}; music={musicEnabled}; fixed headroom, no music ducking.");
+            Log.Write($"Audio engine started, 48000 Hz stereo float mix; player={player.Id}; voice={microphoneEnabled}; music={musicEnabled}; channel={channelMode}; renderBuffer={outputBufferMs}ms; fixed headroom, no music ducking.");
         }
         catch { Cleanup(); throw; }
         finally { lifecycle.Release(); }
@@ -93,7 +102,7 @@ public sealed class AudioEngine : IDisposable
                 foreach (var pid in captures.Keys.Where(pid => !roots.Contains(pid)).ToArray())
                 {
                     var removed = captures[pid]; captures.Remove(pid);
-                    music.Replace(captures.Values.Select(c => c.Queue));
+                    PublishCaptures();
                     removed.Dispose();
                 }
                 foreach (uint pid in roots.Where(pid => !captures.ContainsKey(pid)))
@@ -102,7 +111,7 @@ public sealed class AudioEngine : IDisposable
                     var capture = new ProcessLoopback(pid);
                     try { await capture.StartAsync(); captures.Add(pid, capture); }
                     catch { capture.Dispose(); throw; }
-                    music.Replace(captures.Values.Select(c => c.Queue));
+                    PublishCaptures();
                 }
                 foreach (var capture in captures.Values)
                     if (capture.Failure is not null) throw new InvalidOperationException($"{player.Name}捕获中断，请重新启动混音。", capture.Failure);
@@ -125,6 +134,12 @@ public sealed class AudioEngine : IDisposable
         }
         finally { lifecycle.Release(); }
     }
+    private void PublishCaptures()
+    {
+        var snapshot = captures.Values.ToArray();
+        music.Replace(snapshot.Select(c => c.Queue));
+        Volatile.Write(ref telemetryCaptures, snapshot);
+    }
     private void Cleanup()
     {
         Running = false;
@@ -134,6 +149,7 @@ public sealed class AudioEngine : IDisposable
         output?.Dispose(); output = null;
         microphone?.Dispose(); microphone = null;
         music.Replace([]);
+        Volatile.Write(ref telemetryCaptures, []);
         foreach (var c in captures.Values) c.Dispose();
         captures.Clear();
         micInput = null; Mixer = null;
@@ -144,3 +160,5 @@ public sealed class AudioEngine : IDisposable
     }
     public void Dispose() => StopAsync().GetAwaiter().GetResult();
 }
+
+public sealed record CaptureStatistics(int Sources, double MissingMilliseconds, double DroppedMilliseconds, long Discontinuities);
