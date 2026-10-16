@@ -17,7 +17,8 @@ public sealed class MusicRelayClient : IAsyncDisposable
     private readonly HttpClient http;
     private readonly string roomId, writeToken;
     private readonly byte[] encryptionKey = RandomNumberGenerator.GetBytes(32);
-    private readonly Channel<byte[]> queue = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(80) { SingleReader = true, SingleWriter = true, FullMode = BoundedChannelFullMode.Wait });
+    // Four seconds of bounded capture data absorb short WAN stalls without changing music gain.
+    private readonly Channel<byte[]> queue = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(400) { SingleReader = true, SingleWriter = true, FullMode = BoundedChannelFullMode.Wait });
     private readonly CancellationTokenSource stop = new();
     private readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Task? uploader;
