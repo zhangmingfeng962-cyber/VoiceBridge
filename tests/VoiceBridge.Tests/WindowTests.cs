@@ -41,6 +41,24 @@ public sealed class WindowTests
     }
 
     [Fact]
+    public async Task IndependentShareRequiresExplicitStartAndDoesNotEnableRecordingOnLaunch() => await OnSta(() =>
+    {
+        var window = new MainWindow(false, enableTray: false, showTrayNotifications: false, initialSettings: new Settings { MusicPlayerId = "netease" });
+        try
+        {
+            var selector = (System.Windows.Controls.ComboBox)window.FindName("BroadcastPlayerBox");
+            Assert.Equal("netease", ((MusicPlayer)selector.SelectedItem).Id);
+            Assert.Equal(3, selector.Items.Count);
+            Assert.False(((System.Windows.Controls.Button)window.FindName("BroadcastStopButton")).IsEnabled);
+            Assert.False(((System.Windows.Controls.Button)window.FindName("BroadcastCopyButton")).IsEnabled);
+            Assert.Equal("尚未创建链接", ((System.Windows.Controls.TextBox)window.FindName("BroadcastLinkBox")).Text);
+            Assert.Equal("人声：关", ((System.Windows.Controls.Button)window.FindName("MicrophoneButton")).Content);
+            Assert.Equal("音乐：关", ((System.Windows.Controls.Button)window.FindName("ShareButton")).Content);
+        }
+        finally { ExitAndPump(window); }
+    });
+
+    [Fact]
     public async Task ScenarioSwitchRestoresIndependentControlsWithoutStartingCapture() => await OnSta(() =>
     {
         var settings = new Settings();

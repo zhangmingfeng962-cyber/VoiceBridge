@@ -36,6 +36,7 @@ public partial class MainWindow : Window
         startup = startupRegistration ?? new StartupRegistration();
         InitializeComponent();
         InitializeScenarios();
+        InitializeSharing();
         UpdateStartupControl();
         Activated += (_, _) => UpdateStartupControl();
         MicSlider.Value = settings.MicrophoneVolume; MusicSlider.Value = settings.MusicVolume;
@@ -54,7 +55,7 @@ public partial class MainWindow : Window
                         () => SetSourcesAsync(!sendingMicrophone, sendingMusic),
                         () => SetSourcesAsync(sendingMicrophone, !sendingMusic),
                         amount => MusicSlider.Value = Math.Clamp(MusicSlider.Value + amount, 0, 100),
-                        () => SetSourcesAsync(false, false), RequestExit);
+                        StopAllAsync, RequestExit);
                 }
                 catch (Exception ex) { Log.Write(ex.ToString()); StatusText.Text = "托盘暂不可用，关闭窗口将正常退出。"; }
             }
@@ -93,7 +94,8 @@ public partial class MainWindow : Window
     }
     private async void Start_Click(object sender, RoutedEventArgs e)
     {
-        await SetSourcesAsync(!engine.Running, false);
+        if (engine.Running || BroadcastActive) await StopAllAsync();
+        else await SetSourcesAsync(true, false);
     }
     private async Task SetSourcesAsync(bool microphoneOn, bool musicOn)
     {
@@ -129,8 +131,8 @@ public partial class MainWindow : Window
     }
     private void UpdateControls()
     {
-        StartButton.Content = engine.Running ? "全部停止" : "启动人声";
-        StartButton.IsEnabled = !busy && supported && (engine.Running || (MicrophoneBox.SelectedItem is not null && CableBox.SelectedItem is not null));
+        StartButton.Content = engine.Running || BroadcastActive ? "全部停止" : "启动人声";
+        StartButton.IsEnabled = !busy && supported && (engine.Running || BroadcastActive || (MicrophoneBox.SelectedItem is not null && CableBox.SelectedItem is not null));
         bool canToggle = !busy && supported && MicrophoneBox.SelectedItem is not null && CableBox.SelectedItem is not null && (!engine.Running || engine.Failure is null);
         ShareButton.IsEnabled = MicrophoneButton.IsEnabled = canToggle;
         MicrophoneButton.Content = sendingMicrophone ? "人声：开" : "人声：关";
@@ -140,6 +142,7 @@ public partial class MainWindow : Window
         MicrophoneBox.IsEnabled = CableBox.IsEnabled = MusicPlayerBox.IsEnabled = RefreshButton.IsEnabled = RepairButton.IsEnabled = InstallButton.IsEnabled = !engine.Running && !busy;
         ScenarioBox.IsEnabled = ChannelModeBox.IsEnabled = BufferBox.IsEnabled = !engine.Running && !busy && !localOperation && !closing;
         UpdateScenarioStatus();
+        UpdateBroadcastControls();
         tray?.Update();
         QueueExitIfReady();
     }
@@ -174,6 +177,7 @@ public partial class MainWindow : Window
         }
         if (tick % 10 == 0)
         {
+            UpdateBroadcastTelemetry();
             var stats = engine.MusicStatistics();
             CaptureTelemetryText.Text = !engine.Running ? "捕获统计：未启动。" : $"音乐捕获：{stats.Sources} 个进程树 · 本次缺样补零 {stats.MissingMilliseconds:F1} ms · 丢弃 {stats.DroppedMilliseconds:F1} ms · 原生不连续 {stats.Discontinuities} 次。启动和暂停也可能影响计数，不能直接当作平台过滤。";
         }
@@ -198,7 +202,7 @@ public partial class MainWindow : Window
         tray?.Update();
         CaptureScenarioControls(); UpdateScenarioStatus();
     }
-    private TrayState GetTrayState() => new(sendingMicrophone, sendingMusic, (int)MusicSlider.Value, !closing && MicrophoneButton.IsEnabled, engine.Running, busy || closing, SelectedMusicPlayer.Name);
+    private TrayState GetTrayState() => new(sendingMicrophone, sendingMusic, (int)MusicSlider.Value, !closing && MicrophoneButton.IsEnabled, engine.Running || BroadcastActive, busy || closing, SelectedMusicPlayer.Name, BroadcastActive);
     private void SaveSettings()
     {
         if (!persistSettingsOnClose) return;
@@ -236,6 +240,7 @@ public partial class MainWindow : Window
     {
         if (closing || canClose) return;
         CancelLocalOperation();
+        broadcastCancellation?.Cancel();
         exitRequested = true;
         if (busy) StatusText.Text = "正在完成当前操作，完成后退出。";
         QueueExitIfReady();
@@ -359,6 +364,7 @@ public partial class MainWindow : Window
         {
             CancelLocalOperation();
             if (localTask is { } pending) { try { await pending; } catch (Exception ex) { Log.Write(ex.ToString()); } }
+            await StopBroadcastAsync();
             try { await engine.StopAsync(); }
             catch (Exception ex) { Log.Write(ex.ToString()); }
             canClose = true;

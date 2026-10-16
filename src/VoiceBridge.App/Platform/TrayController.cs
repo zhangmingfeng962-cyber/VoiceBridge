@@ -2,7 +2,7 @@ using Forms = System.Windows.Forms;
 
 namespace VoiceBridge.App.Platform;
 
-public sealed record TrayState(bool MicrophoneOn, bool MusicOn, int MusicVolume, bool CanChange, bool Running, bool Busy, string MusicPlayerName = "QQ音乐");
+public sealed record TrayState(bool MicrophoneOn, bool MusicOn, int MusicVolume, bool CanChange, bool Running, bool Busy, string MusicPlayerName = "QQ音乐", bool IndependentMusic = false);
 
 public sealed class TrayController : IDisposable
 {
@@ -14,6 +14,7 @@ public sealed class TrayController : IDisposable
     private readonly Forms.ToolStripMenuItem volumeUp = new("音乐音量 +5%");
     private readonly Forms.ToolStripMenuItem volumeDown = new("音乐音量 -5%");
     private readonly Forms.ToolStripMenuItem stop = new("全部停止");
+    private readonly Forms.ToolStripMenuItem independent = new("独立音乐链接：关") { Enabled = false };
     private readonly Func<TrayState> getState;
     private bool disposed;
     public bool Visible => !disposed && icon.Visible;
@@ -30,7 +31,7 @@ public sealed class TrayController : IDisposable
         volumeDown.Click += (_, _) => adjustMusic(-5);
         stop.Click += async (_, _) => await RunAsync(stopAll);
         exitItem.Click += (_, _) => exit();
-        menu.Items.AddRange([showItem, new Forms.ToolStripSeparator(), microphone, music, volumeUp, volumeDown, stop, new Forms.ToolStripSeparator(), exitItem]);
+        menu.Items.AddRange([showItem, new Forms.ToolStripSeparator(), microphone, music, volumeUp, volumeDown, independent, stop, new Forms.ToolStripSeparator(), exitItem]);
         menu.Opening += (_, _) => Update();
         icon = new Forms.NotifyIcon { Icon = drawingIcon, Text = "VoiceBridge", ContextMenuStrip = menu, Visible = true };
         icon.MouseClick += (_, e) => { if (e.Button == Forms.MouseButtons.Left) show(); };
@@ -49,7 +50,8 @@ public sealed class TrayController : IDisposable
         volumeUp.Enabled = !state.Busy && state.MusicVolume < 100;
         volumeDown.Enabled = !state.Busy && state.MusicVolume > 0;
         stop.Enabled = !state.Busy && state.Running;
-        icon.Text = $"VoiceBridge · 人声{(state.MicrophoneOn ? "开" : "关")} · {state.MusicPlayerName}{(state.MusicOn ? "开" : "关")} · {state.MusicVolume}%";
+        independent.Text = state.IndependentMusic ? "独立音乐链接：开（收起后继续）" : "独立音乐链接：关";
+        icon.Text = $"VoiceBridge · 人声{(state.MicrophoneOn ? "开" : "关")} · 频道音乐{(state.MusicOn ? "开" : "关")} · 链接{(state.IndependentMusic ? "开" : "关")}";
     }
 
     public void ExplainMinimize()

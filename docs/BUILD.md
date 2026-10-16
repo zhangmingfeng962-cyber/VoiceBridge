@@ -5,6 +5,8 @@
 - Windows x64。
 - .NET 8 SDK 8.0.426；允许的补丁回退策略见 `global.json`。
 - NuGet：NAudio.Wasapi / NAudio.Core 2.2.1。
+- .NET 8 SDK 提供 ASP.NET Core 框架引用，用于仅监听回环的音乐服务；自包含发布会一起打包运行时。
+- Node.js 18+ 仅用于运行 `node --test tests/web/receiver-worklet.test.cjs`，运行应用不需要 Node。
 - 测试依赖：Microsoft.NET.Test.Sdk 17.11.1、xunit 2.9.2、xunit.runner.visualstudio 2.8.2。
 
 不需要 WDK。编译的应用使用现成的、遵循原作者许可的 VB-CABLE；它本身不包含自行开发或签名的内核驱动。
@@ -18,7 +20,7 @@ dotnet test tests\VoiceBridge.Tests\VoiceBridge.Tests.csproj -c Release --no-bui
 dotnet publish src\VoiceBridge.App\VoiceBridge.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:DebugType=None -o artifacts\publish
 ```
 
-或者运行 `scripts\build.ps1`。所有运行时和必要组件资源嵌入单文件；`scripts\publish-portable.ps1` 也可直接发布。
+或者运行 `scripts\build.ps1`。运行时、接收页和原虚拟组件资源嵌入单文件；可选的官方 cloudflared 在首次明确创建临时链接时下载并校验。`scripts\publish-portable.ps1` 也可直接发布。
 
 ## 验证范围
 
@@ -31,6 +33,12 @@ v0.4.0 增加三个播放器的进程根选择、大小写匹配、嵌套进程�
 v0.5.0 增加场景独立保存 / 迁移、参数签名与手动反馈失效、音乐声道处理、WAV 统计和默认输入恢复计划测试。Windows 默认输入状态在后台只读刷新。基础测试不改变真实默认输入、不录制真实声音、不启动平台通话；虚拟输入录制和耳机试听仍需通过用户明确点击的实机检查，各平台接收效果还需另行验收。
 
 这些短时、合成音和局部实机检查不代表所有用户设备、所有语音平台、长期负载或 <100 ms 已达标。仓库不包含开发者的设备报告、录音和个人路由备份。
+
+v0.6.0 增加 PCM 位值保持、双收听端、密钥拒绝、Origin 检查、8 人上限、资源 / 安全头、停止撤销和默认不分享的测试。接收 worklet 的启动缓冲、独立左右声道、断流补零、序号跳变 / 回绕、非有限值和过期队列由 Node 内置测试覆盖。基础测试启动回环 HTTP / WebSocket 服务，不访问公网或真实音频设备。
+
+本次发布验证：67 项 .NET 基础测试、5 项接收缓冲测试通过；桌面 Edge 的本机合成音链路接收约 37 MB，页面显示 0 次缓冲耗尽和序号中断。播放音量为 0，验证链路运行与队列统计，未作主观音质验收。临时互联网域名可创建，但本机外网健康检查超时、浏览器访问连接被关闭，**跨网传输未通过**；固定 HTTPS 中继和真实朋友端收听尚未验证。
+
+开发者可运行 `VoiceBridge.exe --serve-music-demo demo.json`，生成低音量合成测试音和本机收听地址，最多持续 5 分钟；创建 `demo.json.stop` 提前结束。加 `--internet` 会下载 / 启动官方连接组件并尝试临时公网地址。该诊断不采集麦克风或播放器；不要把包含临时密钥的诊断报告提交到仓库。
 
 ## 音频测试
 

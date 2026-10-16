@@ -19,9 +19,11 @@ public static class UiPreview
         cable.ItemsSource = new[] { new Audio.DeviceChoice("preview-cable", "CABLE Input (VB-Audio Virtual Cable)") };
         cable.SelectedIndex = 0;
         ((System.Windows.Controls.TextBlock)window.FindName("StatusText")).Text = "界面预览 · 选择播放器后，分别开启需要的人声和音乐。";
+        ((System.Windows.Controls.Button)window.FindName("StartupButton")).Content = "开机自启动：关";
+        ((System.Windows.Controls.TextBlock)window.FindName("StartupStatusText")).Text = "界面预览 · 不修改开机自启动或音频状态。";
         var content = (System.Windows.Controls.ScrollViewer)window.Content;
         content.Background = window.Background;
-        int height = expandScenario ? 1540 : 920;
+        int height = expandScenario ? 2000 : 1650;
         content.Measure(new Size(850, height));
         content.Arrange(new Rect(0, 0, 850, height));
         content.UpdateLayout();

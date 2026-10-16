@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoiceBridge · 音乐收听</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,"Microsoft YaHei",sans-serif;background:#101927;color:#e6eef9}*{box-sizing:border-box}body{margin:0;padding:48px 20px}main{max-width:680px;margin:auto}.brand{color:#79dfc1;font-size:14px;letter-spacing:.15em}h1{font-size:32px;margin:12px 0}p{color:#aebbd2;line-height:1.8}.card{background:#182437;border:1px solid #2d4057;border-radius:18px;padding:24px;margin-top:24px}.status{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:600}.dot{width:10px;height:10px;background:#8da0bb;border-radius:50%}.dot.live{background:#71e0c0}button{font:inherit;border:0;border-radius:9px;padding:12px 22px;cursor:pointer;background:#375ed8;color:white;margin-right:10px;margin-top:16px}button.secondary{background:#30445c}button:disabled{opacity:.5;cursor:default}label{display:block;color:#c9d6e9;margin-top:24px}input[type=range]{width:100%;accent-color:#71e0c0;margin:14px 0}select{font:inherit;background:#101927;color:#e6eef9;padding:10px;border-radius:8px;border:1px solid #405575;width:100%;margin-top:10px}.detail{font-size:13px;color:#96a9c4;line-height:1.9;overflow-wrap:anywhere}.warning{color:#f2d39a}.meter{height:6px;background:#293951;border-radius:6px;margin:18px 0;overflow:hidden}.meter>div{background:#71e0c0;height:100%;width:0;transition:width .15s}a{color:#8dc5ff}footer{margin-top:24px;font-size:13px;color:#8195b2;line-height:1.8}
+</style>
+<script src="/receiver.js" defer></script>
+</head>
+<body><main>
+<div class="brand">VOICEBRIDGE / LISTEN</div>
+<h1>音乐直接送到你这里。</h1>
+<p>继续在 QQ、微信或游戏里聊天，这个页面只接收分享者选中的音乐。无需开启麦克风或安装接收软件。</p>
+<section class="card" aria-label="音乐播放器">
+<div class="status" role="status"><span class="dot" id="dot"></span><span id="status">等待开始收听</span></div>
+<p id="source">48 kHz · 双声道 · 未压缩 PCM</p>
+<button id="start">开始收听</button><button id="stop" class="secondary" disabled>停止收听</button>
+<label for="volume">收听音量 <output id="volumeValue">70%</output></label>
+<input id="volume" type="range" min="0" max="100" value="70" aria-label="收听音量">
+<div class="meter" aria-hidden="true"><div id="level"></div></div>
+<label for="buffer">网络缓冲</label>
+<select id="buffer"><option value="120">120 ms · 网络稳定时</option><option value="240" selected>240 ms · 推荐起点</option><option value="480">480 ms · 更大缓冲</option></select>
+<p class="detail" id="metrics">尚未连接。缓冲会增加延迟；它不是实际端到端延迟。</p>
+<p class="detail warning" id="notice">请用耳机收听。分享者停止后链接失效；请勿转发包含收听密钥的完整链接。</p>
+</section>
+<footer>这里不使用麦克风采集、回声消除、降噪或自动增益。网络不足仍可能中断；浏览器、系统听音增强和耳机也会影响最终声音。手机浏览器锁屏后可能暂停播放。临时互联网链接由 Cloudflare 转发，适合试用，不提供持续可用保证。</footer>
+</main></body></html>

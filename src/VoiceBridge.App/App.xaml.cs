@@ -9,6 +9,14 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (e.Args.Contains("--serve-music-demo"))
+        {
+            var path = e.Args.SkipWhile(x => x != "--serve-music-demo").Skip(1).FirstOrDefault();
+            if (path is null) { Shutdown(2); return; }
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            _ = RunMusicDemoAsync(path, e.Args.Contains("--internet"));
+            return;
+        }
         if (e.Args.Contains("--probe-tray"))
         {
             var path = e.Args.SkipWhile(x => x != "--probe-tray").Skip(1).FirstOrDefault();
@@ -103,6 +111,11 @@ public partial class App : Application
     private async Task RunProbeAsync(string path)
     {
         try { await EngineProbe.WriteAsync(path); Shutdown(0); }
+        catch (Exception ex) { Log.Write(ex.ToString()); Shutdown(1); }
+    }
+    private async Task RunMusicDemoAsync(string path, bool internet)
+    {
+        try { await Sharing.MusicLinkDemo.RunAsync(path, internet); Shutdown(0); }
         catch (Exception ex) { Log.Write(ex.ToString()); Shutdown(1); }
     }
     private async Task ProbeTrayAsync(string path)
