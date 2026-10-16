@@ -9,7 +9,7 @@ namespace VoiceBridge.Tests;
 [Collection("WpfWindow")]
 public sealed class WindowTests
 {
-    private static MainWindow CreateTrayWindow() => new(persistSettingsOnClose: false, enableTray: true, showTrayNotifications: false)
+    private static MainWindow CreateTrayWindow() => new(persistSettingsOnClose: false, enableTray: true, showTrayNotifications: false, useAudioHardware: false)
     {
         WindowStartupLocation = WindowStartupLocation.Manual,
         Left = -32000, Top = -32000, ShowActivated = false, ShowInTaskbar = false
@@ -43,7 +43,7 @@ public sealed class WindowTests
     [Fact]
     public async Task IndependentShareRequiresExplicitStartAndDoesNotEnableRecordingOnLaunch() => await OnSta(() =>
     {
-        var window = new MainWindow(false, enableTray: false, showTrayNotifications: false, initialSettings: new Settings { MusicPlayerId = "netease" });
+        var window = new MainWindow(false, enableTray: false, showTrayNotifications: false, useAudioHardware: false, initialSettings: new Settings { MusicPlayerId = "netease" });
         try
         {
             var selector = (System.Windows.Controls.ComboBox)window.FindName("BroadcastPlayerBox");
@@ -62,7 +62,7 @@ public sealed class WindowTests
     public async Task ScenarioSwitchRestoresIndependentControlsWithoutStartingCapture() => await OnSta(() =>
     {
         var settings = new Settings();
-        var window = new MainWindow(false, enableTray: false, showTrayNotifications: false, initialSettings: settings);
+        var window = new MainWindow(false, enableTray: false, showTrayNotifications: false, useAudioHardware: false, initialSettings: settings);
         try
         {
             var scenes = (System.Windows.Controls.ComboBox)window.FindName("ScenarioBox");
@@ -92,7 +92,7 @@ public sealed class WindowTests
     {
         var settings = new Settings { MusicPlayerId = "kugou" };
         var window = new MainWindow(persistSettingsOnClose: false, enableTray: false,
-            showTrayNotifications: false, initialSettings: settings);
+            showTrayNotifications: false, useAudioHardware: false, initialSettings: settings);
         try
         {
             var selector = (System.Windows.Controls.ComboBox)window.FindName("MusicPlayerBox");
@@ -132,7 +132,7 @@ public sealed class WindowTests
     [Fact]
     public async Task StartupFallsBackToVisibleWindowWhenTrayIsUnavailable() => await OnSta(() =>
     {
-        var window = new MainWindow(persistSettingsOnClose: false, enableTray: false, showTrayNotifications: false);
+        var window = new MainWindow(persistSettingsOnClose: false, enableTray: false, showTrayNotifications: false, useAudioHardware: false);
         window.ShowForLaunch(startInTray: true);
         Assert.True(window.IsVisible);
         Assert.False(window.IsHiddenToTray);
@@ -145,7 +145,7 @@ public sealed class WindowTests
         string keyPath = @"Software\VoiceBridge.Tests\StartupUi-" + Guid.NewGuid().ToString("N");
         var registration = new StartupRegistration(keyPath, () => @"C:\Example Tools\VoiceBridge.exe");
         var window = new MainWindow(persistSettingsOnClose: false, enableTray: false,
-            showTrayNotifications: false, startupRegistration: registration);
+            showTrayNotifications: false, useAudioHardware: false, startupRegistration: registration);
         try
         {
             var button = (System.Windows.Controls.Button)window.FindName("StartupButton");
@@ -219,7 +219,7 @@ public sealed class WindowTests
         {
             try
             {
-                var window = new MainWindow(persistSettingsOnClose: false, enableTray: false);
+                var window = new MainWindow(persistSettingsOnClose: false, enableTray: false, useAudioHardware: false);
                 var frame = new DispatcherFrame();
                 int count = 0;
                 window.Closing += (_, _) => count++;

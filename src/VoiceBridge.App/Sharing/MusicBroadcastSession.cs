@@ -15,6 +15,7 @@ public sealed class MusicBroadcastSession : IAsyncDisposable
     private Task? discovery;
     private Thread? pump;
     private QuickMusicTunnel? tunnel;
+    private MusicRelayClient? relay;
     private Exception? failure;
     private long packets, invalidSamples, overloadedSamples;
     private int disposed;
@@ -27,6 +28,10 @@ public sealed class MusicBroadcastSession : IAsyncDisposable
     public long Packets => Interlocked.Read(ref packets);
     public long InvalidSamples => Interlocked.Read(ref invalidSamples);
     public long OverloadedSamples => Interlocked.Read(ref overloadedSamples);
+    public bool UsesRelay => relay is not null;
+    public long UploadedChunks => relay?.SentChunks ?? 0;
+    public long UploadDroppedPackets => relay?.DroppedPackets ?? 0;
+    public Exception? RelayFailure => relay?.Failure;
     public CaptureStatistics Statistics()
     {
         var current = Volatile.Read(ref snapshot);
@@ -107,15 +112,29 @@ public sealed class MusicBroadcastSession : IAsyncDisposable
         }
         catch { candidate.Dispose(); throw; }
     }
+    public async Task CreateRelayLinkAsync(string playerId, IProgress<string>? progress, CancellationToken token)
+    {
+        if (relay is not null || tunnel is not null) throw new InvalidOperationException("请先停止已有分享。");
+        progress?.Report("正在连接或唤醒 HTTPS 音乐中继，免费服务冷启动可能需约 1 分钟…");
+        var candidate = await MusicRelayClient.CreateAsync(RelayProfile.Load(), playerId, token).ConfigureAwait(false);
+        Server.PacketPublished += candidate.Publish;
+        try
+        {
+            await candidate.WaitUntilReadyAsync(token).ConfigureAwait(false);
+            relay = candidate; PublicLink = candidate.PublicLink;
+        }
+        catch { Server.PacketPublished -= candidate.Publish; await candidate.DisposeAsync().ConfigureAwait(false); throw; }
+    }
     public void UseHttpsOrigin(Uri origin)
     {
-        if (tunnel is not null) throw new InvalidOperationException("请先停止独立分享，取消临时链接并重新开始，再接入固定 HTTPS 地址。");
+        if (tunnel is not null || relay is not null) throw new InvalidOperationException("请先停止独立分享，取消跨网连接并重新开始，再接入固定 HTTPS 地址。");
         Server.SetPublicOrigin(origin); PublicLink = Server.Invite(origin);
     }
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref disposed, 1) != 0) return;
         stop.Cancel(); tunnel?.Dispose();
+        if (relay is not null) { Server.PacketPublished -= relay.Publish; await relay.DisposeAsync().ConfigureAwait(false); }
         if (discovery is not null) { try { await discovery.ConfigureAwait(false); } catch (OperationCanceledException) { } }
         if (pump is not null) await Task.Run(pump.Join).ConfigureAwait(false);
         music.Replace([]); Volatile.Write(ref snapshot, []);

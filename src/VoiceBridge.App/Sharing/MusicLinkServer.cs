@@ -33,6 +33,7 @@ public sealed class MusicLinkServer : IAsyncDisposable
     public string HealthId => healthId;
     public int ListenerCount => listeners.Count;
     public long SlowConnections => Interlocked.Read(ref overflows);
+    public event Action<byte[]>? PacketPublished;
     public string Invite(Uri origin) => origin.GetLeftPart(UriPartial.Authority) + "/#" + token;
 
     public void SetPublicOrigin(Uri origin)
@@ -154,6 +155,7 @@ public sealed class MusicLinkServer : IAsyncDisposable
     public void Publish(byte[] packet)
     {
         if (packet.Length != MusicPacket.PacketBytes || !packet.AsSpan(0, 4).SequenceEqual("VBM1"u8)) throw new ArgumentException("Invalid PCM packet.");
+        PacketPublished?.Invoke(packet);
         foreach (var item in listeners)
             if (!item.Value.Packets.Writer.TryWrite(packet))
             {

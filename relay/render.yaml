@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: voicebridge-music-relay
+    runtime: node
+    plan: free
+    rootDir: relay
+    buildCommand: node --version
+    startCommand: node server.mjs
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: PUBLISH_KEY_HASH
+        sync: false

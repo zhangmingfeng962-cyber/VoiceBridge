@@ -14,7 +14,7 @@ public partial class App : Application
             var path = e.Args.SkipWhile(x => x != "--serve-music-demo").Skip(1).FirstOrDefault();
             if (path is null) { Shutdown(2); return; }
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            _ = RunMusicDemoAsync(path, e.Args.Contains("--internet"));
+            _ = RunMusicDemoAsync(path, e.Args.Contains("--internet"), e.Args.Contains("--relay"));
             return;
         }
         if (e.Args.Contains("--probe-tray"))
@@ -113,9 +113,9 @@ public partial class App : Application
         try { await EngineProbe.WriteAsync(path); Shutdown(0); }
         catch (Exception ex) { Log.Write(ex.ToString()); Shutdown(1); }
     }
-    private async Task RunMusicDemoAsync(string path, bool internet)
+    private async Task RunMusicDemoAsync(string path, bool internet, bool relay)
     {
-        try { await Sharing.MusicLinkDemo.RunAsync(path, internet); Shutdown(0); }
+        try { await Sharing.MusicLinkDemo.RunAsync(path, internet, relay); Shutdown(0); }
         catch (Exception ex) { Log.Write(ex.ToString()); Shutdown(1); }
     }
     private async Task ProbeTrayAsync(string path)

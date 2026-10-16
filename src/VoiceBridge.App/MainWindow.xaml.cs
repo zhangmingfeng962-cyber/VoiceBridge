@@ -25,14 +25,16 @@ public partial class MainWindow : Window
     private readonly bool persistSettingsOnClose;
     private readonly bool showTrayNotifications;
     private readonly StartupRegistration startup;
+    private readonly bool useAudioHardware;
     public bool IsHiddenToTray { get; private set; }
     public bool TrayIconVisible => tray?.Visible == true;
     public MainWindow() : this(true) { }
-    public MainWindow(bool persistSettingsOnClose, bool enableTray = true, bool showTrayNotifications = true, StartupRegistration? startupRegistration = null, Settings? initialSettings = null)
+    public MainWindow(bool persistSettingsOnClose, bool enableTray = true, bool showTrayNotifications = true, StartupRegistration? startupRegistration = null, Settings? initialSettings = null, bool useAudioHardware = true)
     {
         settings = initialSettings ?? Settings.Load();
         this.persistSettingsOnClose = persistSettingsOnClose;
         this.showTrayNotifications = showTrayNotifications;
+        this.useAudioHardware = useAudioHardware;
         startup = startupRegistration ?? new StartupRegistration();
         InitializeComponent();
         InitializeScenarios();
@@ -76,7 +78,7 @@ public partial class MainWindow : Window
         {
             string? micId = (MicrophoneBox.SelectedItem as DeviceChoice)?.Id ?? settings.MicrophoneId;
             string? cableId = (CableBox.SelectedItem as DeviceChoice)?.Id ?? settings.CableId;
-            var list = AudioDevices.List();
+            var list = useAudioHardware ? AudioDevices.List() : (Microphones: Array.Empty<DeviceChoice>(), Cables: Array.Empty<DeviceChoice>(), DefaultMic: (string?)null);
             MicrophoneBox.ItemsSource = list.Microphones; CableBox.ItemsSource = list.Cables;
             MicrophoneBox.SelectedItem = list.Microphones.FirstOrDefault(x => x.Id == micId) ?? list.Microphones.FirstOrDefault(x => x.Id == list.DefaultMic) ?? list.Microphones.FirstOrDefault();
             CableBox.SelectedItem = list.Cables.FirstOrDefault(x => x.Id == cableId) ?? list.Cables.FirstOrDefault();

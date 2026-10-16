@@ -108,6 +108,7 @@ public partial class MainWindow
 
     private void ReadDefaultInputStatus()
     {
+        if (!useAudioHardware) { InputRoutingText.Text = "界面预览 / 测试：未读取真实音频设备。"; return; }
         Interlocked.Exchange(ref routeRefreshRequested, 1);
         if (Interlocked.CompareExchange(ref routeReadInProgress, 1, 0) != 0) return;
         _ = ReadDefaultInputStatusAsync();
