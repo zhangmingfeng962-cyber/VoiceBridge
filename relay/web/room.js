@@ -8,6 +8,17 @@
   const fromHex=value=>Uint8Array.from(value.match(/../g),s=>parseInt(s,16));
   const toHex=value=>[...value].map(v=>v.toString(16).padStart(2,'0')).join('');
   const aad=(id,seq)=>new TextEncoder().encode(room+'|voice|'+id+'|'+seq);
+  const virtualInput=label=>/cable\s*output|voicemeeter|stereo\s*mix|立体声混音/i.test(label||'');
+  async function refreshInputs(){
+    try{
+      const selected=el('voiceInput').value,devices=await navigator.mediaDevices.enumerateDevices?.()||[];
+      el('voiceInput').replaceChildren();const option=document.createElement('option');option.value='';option.textContent='系统默认麦克风';el('voiceInput').append(option);
+      for(const device of devices.filter(d=>d.kind==='audioinput'&&d.deviceId!=='default'&&d.deviceId!=='communications')){
+        const item=document.createElement('option');item.value=device.deviceId;item.textContent=(device.label||'麦克风（允许权限后显示名称）')+(virtualInput(device.label)?' · 虚拟输入':'');el('voiceInput').append(item);
+      }
+      el('voiceInput').value=selected||'';
+    }catch{text('无法读取设备列表，可使用浏览器的麦克风设置选择输入');}
+  }
   function keyFor(id){
     if(!keys.has(id))keys.set(id,(async()=>{
       const base=await crypto.subtle.importKey('raw',fromHex(keyHex),'HKDF',false,['deriveKey']);
@@ -30,8 +41,12 @@
     if(micBusy||!selfId||socket?.readyState!==WebSocket.OPEN)return;
     micBusy=true;const current=++micGeneration;el('microphone').disabled=true;text('等待你允许麦克风…');
     try{
-      const candidate=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:false},video:false});
+      const selected=el('voiceInput').value;
+      const candidate=await navigator.mediaDevices.getUserMedia({audio:{...(selected?{deviceId:{exact:selected}}:{}),channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:false},video:false});
       if(current!==micGeneration||!context||socket?.readyState!==WebSocket.OPEN){candidate.getTracks().forEach(t=>t.stop());return;}
+      await refreshInputs();
+      if(current!==micGeneration||!context||socket?.readyState!==WebSocket.OPEN){candidate.getTracks().forEach(t=>t.stop());return;}
+      if(candidate.getAudioTracks().some(track=>virtualInput(track.label))){candidate.getTracks().forEach(t=>t.stop());text('当前选到了虚拟输入，已停止采集。请在麦克风列表选真实麦克风后重新开启。');return;}
       stream=candidate;await context.resume();source=context.createMediaStreamSource(stream);source.connect(processor);
       for(const track of stream.getAudioTracks())track.onended=()=>void closeMicrophone();
       socket.send(JSON.stringify({type:'microphone',enabled:true}));processor.port.postMessage({type:'capture',enabled:true,id:current});
@@ -93,6 +108,9 @@
     }catch{if(current===generation)await leave('无法打开房间音频，请检查浏览器播放权限');}
   }
   el('join').addEventListener('click',()=>void join());el('leave').addEventListener('click',()=>void leave());el('microphone').addEventListener('click',()=>void toggleMicrophone());
+  el('refreshInputs').addEventListener('click',()=>void refreshInputs());
+  el('voiceInput').addEventListener('change',()=>{if(stream){void closeMicrophone();text('麦克风设备已更换，请重新点击开启');}});
+  void refreshInputs();
   el('voiceVolume').addEventListener('input',()=>{const value=Number(el('voiceVolume').value);el('voiceVolumeValue').textContent=value+'%';if(voiceGain&&context)voiceGain.gain.setTargetAtTime(value/100,context.currentTime,.015);});
   if(host){el('volume').value='0';el('volume').dispatchEvent(new Event('input'));el('hostNotice').hidden=false;el('nickname').value='主持人';}
   const refresh=setInterval(render,300);window.addEventListener('pagehide',()=>{clearInterval(refresh);void leave();});

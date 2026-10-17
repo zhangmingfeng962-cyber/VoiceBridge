@@ -2,7 +2,7 @@
 
 请阅读仓库首页 [README.md](README.md)。
 
-- [下载 v0.8.0](https://github.com/zhangmingfeng962-cyber/VoiceBridge/releases/tag/v0.8.0)
+- [下载 v0.8.1](https://github.com/zhangmingfeng962-cyber/VoiceBridge/releases/tag/v0.8.1)
 - [音乐语音房间](docs/ROOMS.md)
 - [HTTPS 跨网收听](docs/HTTPS-RELAY.md)
 - [独立音乐链接](docs/MUSIC-LINK.md)

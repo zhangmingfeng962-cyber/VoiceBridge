@@ -19,3 +19,6 @@ test('entering a voice room never requests microphone; explicit toggle releases 
 test('leaving during a pending browser permission cannot leave a newly granted microphone active',async()=>{
   let grant,stopped=0;const p=page(()=>new Promise(resolve=>{grant=resolve;}));p.get('join').click();await flush();p.get('microphone').click();await flush();p.get('leave').click();await flush();grant({getTracks:()=>[{stop(){stopped++;}}]});await flush();assert.equal(stopped,1);assert.equal(p.get('microphone')['aria-pressed'],'false');assert.equal(p.get('microphone').disabled,true);
 });
+test('a virtual cable is stopped before connecting to room voice or announcing an open microphone',async()=>{
+  let stopped=0;const track={label:'CABLE Output (VB-Audio Virtual Cable)',stop(){stopped++;}};const p=page(async()=>({getTracks:()=>[track],getAudioTracks:()=>[track]}));p.get('join').click();await flush();p.get('microphone').click();await flush();assert.equal(stopped,1);assert.match(p.get('voiceStatus').textContent,/虚拟输入/);assert.notEqual(p.get('microphone')['aria-pressed'],'true');p.get('leave').click();await flush();
+});
