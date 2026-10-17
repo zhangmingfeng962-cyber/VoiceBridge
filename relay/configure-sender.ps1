@@ -1,4 +1,4 @@
-param([Parameter(Mandatory = $true)][Uri]$Origin, [switch]$RotateKey)
+param([Parameter(Mandatory = $true)][Uri]$Origin, [switch]$RotateKey, [string]$ExportPath)
 $ErrorActionPreference = 'Stop'
 if ($Origin.Scheme -ne 'https' -or $Origin.AbsolutePath -ne '/' -or $Origin.Query -or $Origin.Fragment -or $Origin.UserInfo) { throw 'Use the HTTPS root address of your own relay.' }
 Add-Type -AssemblyName System.Security.Cryptography.ProtectedData
@@ -23,5 +23,13 @@ try {
     if (Test-Path -LiteralPath $relayProfilePath) { Copy-Item -LiteralPath $relayProfilePath -Destination ($relayProfilePath + '.previous') -Force }
     $relayProfile = @{Version=1; Origin=$relayOrigin; ProtectedPublishKey=[Convert]::ToBase64String($relayProtected)}
     [IO.File]::WriteAllText($relayProfilePath, ($relayProfile | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+    if ($ExportPath) {
+        $relayExportPath = [IO.Path]::GetFullPath($ExportPath)
+        if ($relayExportPath -ne [IO.Path]::GetFullPath($relayProfilePath)) {
+            [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($relayExportPath)) | Out-Null
+            if (Test-Path -LiteralPath $relayExportPath) { Copy-Item -LiteralPath $relayExportPath -Destination ($relayExportPath + '.previous') -Force }
+            [IO.File]::WriteAllText($relayExportPath, ($relayProfile | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+        }
+    }
     [pscustomobject]@{Origin=$relayOrigin; PublishKeyHash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($relayKeyBytes)).ToLowerInvariant(); ProfilePath=$relayProfilePath}
 } finally { [Security.Cryptography.CryptographicOperations]::ZeroMemory($relayKeyBytes) }

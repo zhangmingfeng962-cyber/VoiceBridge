@@ -9,6 +9,20 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (e.Args.Contains("--check-relay-profile"))
+        {
+            var path = e.Args.SkipWhile(x => x != "--check-relay-profile").Skip(1).FirstOrDefault();
+            var source = e.Args.SkipWhile(x => x != "--relay-profile").Skip(1).FirstOrDefault();
+            if (path is null) { Shutdown(2); return; }
+            try
+            {
+                var profile = source is null ? Sharing.RelayProfile.Load() : Sharing.RelayProfile.LoadFile(source); _ = profile.ReadPublishKey();
+                System.IO.File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new { Configured = true, Origin = profile.Origin, CredentialReadable = true, Source = source is not null ? "Explicit diagnostic file" : Sharing.RelayProfile.ActivePath == Sharing.RelayProfile.PortableProfilePath ? "Portable beside EXE" : "Current user profile", AudioCaptureOpened = false, MicrophoneOpened = false }));
+                Shutdown(0);
+            }
+            catch (Exception ex) { System.IO.File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new { Configured = false, Error = ex.GetBaseException().Message, AudioCaptureOpened = false, MicrophoneOpened = false })); Shutdown(1); }
+            return;
+        }
         if (e.Args.Contains("--serve-music-demo"))
         {
             var path = e.Args.SkipWhile(x => x != "--serve-music-demo").Skip(1).FirstOrDefault();

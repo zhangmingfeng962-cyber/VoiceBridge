@@ -4,16 +4,22 @@
 
 创建自己的 VoiceBridge 房间：选择 QQ音乐、网易云音乐或酷狗音乐作伴奏，邀请朋友用浏览器进房间，同时讲话、听立体声音乐。音乐与人声分别传送、分别调音量，本机耳机仍正常播放。
 
-**当前公开测试版：v0.8.1，适用于 Windows 11 x64。普通 Windows 10 19045 不支持本项目采用的进程音频捕获接口。**
+**当前公开测试版：v0.8.2，适用于 Windows 11 x64。普通 Windows 10 19045 不支持本项目采用的进程音频捕获接口。**
 
 ## 下载使用
 
-- **[下载 VoiceBridge.exe](https://github.com/zhangmingfeng962-cyber/VoiceBridge/releases/download/v0.8.1/VoiceBridge.exe)**
-- [版本说明、源码包和 SHA-256 校验值](https://github.com/zhangmingfeng962-cyber/VoiceBridge/releases/tag/v0.8.1)
+- **[下载 VoiceBridge.exe](https://github.com/zhangmingfeng962-cyber/VoiceBridge/releases/download/v0.8.2/VoiceBridge.exe)**
+- [版本说明、源码包和 SHA-256 校验值](https://github.com/zhangmingfeng962-cyber/VoiceBridge/releases/tag/v0.8.2)
 
 EXE 自带 .NET / ASP.NET Core 运行时，可直接放到桌面双击。**只使用独立音乐链接时无需虚拟声卡或麦克风。** 原来的虚拟麦克风功能仍需安装设备：应用内附带 **VB-Audio 官方 VB-CABLE 原包**，由用户批准管理员授权并按原厂提示完成安装、重启。已安装 VB-CABLE 时无需重装。
 
 VB-CABLE 是原作者的 donationware，保留其独立许可和捐赠方式。VoiceBridge 的 MIT 许可不涵盖该驱动。详情见[第三方声明](third-party/NOTICE.zh-CN.md)。
+
+## 国内中继与桌面配置
+
+新版增加“导入中继配置”和“检查中继连接”。本机专用便携包中的 `.vbrelay` 由当前 Windows 用户 DPAPI 保护，不能作为公共发送配置分享。首次启动会在用户配置缺失时保存同目录便携配置；已有配置请显式导入。未配置跨网服务时不再自动尝试临时隧道，创建失败会释放本次捕获并允许重试。
+
+原因与国内容器部署说明见 [国内中继与桌面配置](docs/DOMESTIC-RELAY.md)。公共 EXE 仍不含任何账户的发送密钥。
 
 ## 音乐语音房间
 

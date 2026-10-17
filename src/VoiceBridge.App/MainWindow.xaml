@@ -1,6 +1,6 @@
 <Window x:Class="VoiceBridge.App.MainWindow"
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
- Title="VoiceBridge 0.8.1 · 一起听，一起聊" Icon="Assets/voicebridge.ico" Width="850" Height="800" MinWidth="700" MinHeight="680" Background="#101927" WindowStartupLocation="CenterScreen">
+ Title="VoiceBridge 0.8.2 · 国内中继与配置检查" Icon="Assets/voicebridge.ico" Width="850" Height="880" MinWidth="700" MinHeight="680" Background="#101927" WindowStartupLocation="CenterScreen">
  <ScrollViewer VerticalScrollBarVisibility="Auto">
   <StackPanel Margin="32,26,32,28">
    <DockPanel>
@@ -24,7 +24,9 @@
      <Slider x:Name="BroadcastVolumeSlider" Minimum="0" Maximum="100" Value="100" ValueChanged="BroadcastVolume_Changed" AutomationProperties.Name="房间伴奏音量" ToolTip="只改变房间收到的音乐，不随讲话自动压低；不改变你的本地听音。"/>
      <CheckBox x:Name="BroadcastSeparateCheck" IsChecked="True" Content="避免重复听到音乐（开始时关闭兼容输出的音乐）" Foreground="#D6E0EF" Margin="0,6,0,8"/>
      <CheckBox x:Name="BroadcastQuickCheck" IsChecked="True" Content="创建临时互联网链接（测试服务，无账号）" Foreground="#D6E0EF" Margin="0,0,0,8"/>
-     <TextBlock Text="已配置中继时只需 HTTPS 出站连接，朋友无需账号。音乐在本机加密，接收端解密；中继只暂存加密片段。默认约 2.4 秒接收缓冲，实际延迟还取决于网络。没有中继配置时仍可尝试原临时链接。" Foreground="#ADCCC4" FontSize="12" TextWrapping="Wrap"/>
+     <TextBlock Text="支持国内 HTTPS / WSS 中继。默认约 2.4 秒音乐缓冲，实际延迟取决于网络。先导入本机专用配置并检查连接，再创建房间。" Foreground="#ADCCC4" FontSize="12" TextWrapping="Wrap"/>
+     <TextBlock x:Name="RelayConfigurationText" Text="正在读取中继配置…" Foreground="#D6E0EF" FontSize="12" TextWrapping="Wrap" Margin="0,10,0,4"/>
+     <WrapPanel><Button x:Name="RelayImportButton" Content="导入中继配置" Click="RelayImport_Click"/><Button x:Name="RelayCheckButton" Content="检查中继连接" Click="RelayCheck_Click" ToolTip="只检查配置和健康接口，不采集麦克风或音乐，不创建房间。"/></WrapPanel>
      <WrapPanel Margin="0,8,0,0"><Button x:Name="BroadcastStartButton" Content="创建音乐房间" Click="BroadcastStart_Click" Background="#237B65"/><Button x:Name="BroadcastStopButton" Content="停止独立分享" Click="BroadcastStop_Click" Visibility="Collapsed"/><Button x:Name="BroadcastCopyButton" Content="邀请朋友" Click="BroadcastCopy_Click"/><Button x:Name="BroadcastRoomButton" Content="进入语音房间" Click="BroadcastRoom_Click"/><Button x:Name="BroadcastPreviewButton" Content="本机试听音乐" Click="BroadcastPreview_Click"/></WrapPanel>
      <TextBox x:Name="BroadcastLinkBox" IsReadOnly="True" Text="尚未创建链接" AutomationProperties.Name="音乐收听链接" Margin="0,8,0,0" Padding="8" Background="#102621" Foreground="#D6E0EF" BorderBrush="#30665A" TextWrapping="Wrap"/>
      <TextBlock x:Name="BroadcastStatusText" Text="创建后邀请朋友进入房间。房间默认关闭麦克风，点击开启后才能讲话。" Foreground="#ADCCC4" TextWrapping="Wrap" Margin="0,8,0,0"/>

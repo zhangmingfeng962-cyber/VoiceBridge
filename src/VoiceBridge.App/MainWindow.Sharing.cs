@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Net.Http;
+using System.Text.Json;
 using VoiceBridge.App.Platform;
 using VoiceBridge.App.Sharing;
 
@@ -15,12 +17,54 @@ public partial class MainWindow
 
     private void InitializeSharing()
     {
+        try { RelayProfile.RestorePortableIfMissing(RelayProfile.ProfilePath, RelayProfile.PortableProfilePath); }
+        catch (Exception ex) { Log.Write("Portable relay configuration was not imported: " + ex.GetType().Name); }
         BroadcastPlayerBox.ItemsSource = MusicPlayers.All;
         BroadcastPlayerBox.SelectedItem = MusicPlayers.GetOrDefault(settings.MusicPlayerId);
         BroadcastVolumeSlider.Value = settings.BroadcastMusicVolume;
         UpdateBroadcastVolume();
-        BroadcastQuickCheck.Content = RelayProfile.IsConfigured ? "启用跨网收听（使用本机已配置的 HTTPS 音乐中继）" : "启用跨网收听（未配置中继时尝试临时链接）";
+        RefreshRelayConfiguration();
         UpdateBroadcastControls();
+    }
+    private void RefreshRelayConfiguration()
+    {
+        BroadcastQuickCheck.Content = "启用跨网房间（使用已导入的中继）";
+        try
+        {
+            var profile = RelayProfile.Load();
+            RelayConfigurationText.Text = $"中继：{profile.Origin} · {(RelayProfile.ActivePath == RelayProfile.PortableProfilePath ? "EXE 旁便携配置" : "当前 Windows 用户配置")}";
+        }
+        catch { RelayConfigurationText.Text = "尚未导入有效中继配置。桌面版需读取自己的配置；请点下方导入。"; }
+    }
+    private void RelayImport_Click(object sender, RoutedEventArgs e)
+    {
+        if (BroadcastActive || busy || closing) return;
+        var dialog = new Microsoft.Win32.OpenFileDialog { Title = "导入本机专用中继配置", Filter = "VoiceBridge 配置|*.vbrelay;*.json", CheckFileExists = true };
+        if (dialog.ShowDialog(this) != true) return;
+        try
+        {
+            RelayProfile.Import(dialog.FileName, RelayProfile.ProfilePath); RefreshRelayConfiguration();
+            BroadcastStatusText.Text = "配置已保存到当前桌面程序的用户目录。可以先检查连接，再创建房间；未开始采集或分享。";
+        }
+        catch (Exception ex) { BroadcastStatusText.Text = "配置未导入，原配置保留：" + ex.GetBaseException().Message; }
+    }
+    private async void RelayCheck_Click(object sender, RoutedEventArgs e)
+    {
+        if (BroadcastActive || busy || closing) return;
+        busy = true; UpdateControls();
+        try
+        {
+            var profile = RelayProfile.Load(); _ = profile.ReadPublishKey();
+            BroadcastStatusText.Text = "正在检查配置和中继连通性；不采集音频…";
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            using var response = await client.GetAsync(profile.Origin + "/health"); response.EnsureSuccessStatusCode();
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync()); var root = json.RootElement;
+            if (!root.TryGetProperty("service", out var service) || service.GetString() != "VoiceBridge encrypted music relay" || !root.GetProperty("ready").GetBoolean() || !root.TryGetProperty("voiceRooms", out var rooms) || !rooms.GetBoolean())
+                throw new InvalidOperationException("此地址未提供就绪的 VoiceBridge 语音房间服务。");
+            BroadcastStatusText.Text = "配置可读取，中继可访问且支持语音房间。此检查未开房、未采集音频；创建时仍会验证发送权限。";
+        }
+        catch (Exception ex) { BroadcastStatusText.Text = "检查未通过：" + ex.GetBaseException().Message + "。可重新导入配置或改用可访问的国内中继。"; }
+        finally { busy = false; RefreshRelayConfiguration(); UpdateControls(); }
     }
     private void UpdateBroadcastControls()
     {
@@ -30,6 +74,7 @@ public partial class MainWindow
         BroadcastMusicButton.Content = broadcastMusicEnabled && BroadcastActive ? "伴奏：开" : "伴奏：关";
         BroadcastRoomButton.IsEnabled = broadcast?.UsesRelay == true && broadcast.PublicLink is not null && !broadcastBusy && !closing;
         BroadcastStopButton.IsEnabled = BroadcastActive && !broadcastStopping && !closing;
+        RelayImportButton.IsEnabled = RelayCheckButton.IsEnabled = !BroadcastActive && !busy && !closing;
         BroadcastPlayerBox.IsEnabled = BroadcastSeparateCheck.IsEnabled = BroadcastQuickCheck.IsEnabled = !BroadcastActive && !closing;
         BroadcastCopyButton.IsEnabled = broadcast?.PublicLink is not null && !broadcastBusy && !closing;
         BroadcastPreviewButton.IsEnabled = broadcast?.Server.LocalOrigin is not null && !closing;
@@ -41,6 +86,11 @@ public partial class MainWindow
         if (BroadcastActive || busy || closing || !supported) return;
         var player = BroadcastPlayerBox.SelectedItem as MusicPlayer ?? MusicPlayers.QQMusic;
         bool internet = BroadcastQuickCheck.IsChecked == true, separate = BroadcastSeparateCheck.IsChecked == true;
+        if (internet && !RelayProfile.IsConfigured)
+        {
+            BroadcastStatusText.Text = "房间未创建：请先导入中继配置。不会改用临时隧道，也没有开始音频采集。";
+            RefreshRelayConfiguration(); return;
+        }
         broadcastBusy = true; broadcastCancellation = new CancellationTokenSource();
         UpdateControls();
         broadcastTask = StartBroadcastAsync(player.Id, internet, separate, broadcastCancellation.Token);
@@ -50,6 +100,7 @@ public partial class MainWindow
     private async Task StartBroadcastAsync(string playerId, bool internet, bool separate, CancellationToken token)
     {
         var session = new MusicBroadcastSession(); broadcast = session; broadcastMusicEnabled = true;
+        bool ready = false;
         UpdateBroadcastVolume();
         try
         {
@@ -63,18 +114,26 @@ public partial class MainWindow
             if (internet)
             {
                 var progress = new Progress<string>(message => { if (ReferenceEquals(broadcast, session)) BroadcastStatusText.Text = message; });
-                if (RelayProfile.IsConfigured) await session.CreateRelayLinkAsync(playerId, progress, token);
-                else await session.CreateInternetLinkAsync(progress, token);
+                await session.CreateRelayLinkAsync(playerId, progress, token);
                 BroadcastLinkBox.Text = RoomLink(session);
                 BroadcastStatusText.Text = session.UsesRelay ? "音乐房间已就绪。复制邀请给朋友，你点击“进入语音房间”；双方进房间后可单独开启麦克风，伴奏不会经过人声降噪。" : "临时音乐链接已建立；此旧连接仅支持收听，语音房间需要配置新版 HTTPS 中继。";
             }
             else BroadcastStatusText.Text = "本机分享已开始。可本机试听，或在高级选项接入自己的 HTTPS 反向代理。";
+            ready = true;
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { BroadcastStatusText.Text = "已取消创建链接。"; }
         catch (Exception ex)
         {
-            // Keep a successfully started local session for preview/custom HTTPS after a tunnel failure.
-            BroadcastStatusText.Text = "互联网链接未就绪：" + ex.GetBaseException().Message + (session.Server.LocalOrigin is not null ? " 本机服务仍在运行，可停止后重试或配置固定 HTTPS 地址。" : " 请停止后重试。");
+            BroadcastStatusText.Text = "房间未创建：" + ex.GetBaseException().Message + "。已停止本次采集，请检查配置和网络后重试。";
+        }
+        finally
+        {
+            if (!ready)
+            {
+                try { await session.DisposeAsync(); } catch (Exception ex) { Log.Write(ex.GetType().Name); }
+                if (ReferenceEquals(broadcast, session)) broadcast = null;
+                broadcastMusicEnabled = false; BroadcastLinkBox.Text = "房间未创建"; BroadcastLocalText.Text = "本机监听端口：未启动";
+            }
         }
     }
     private async void BroadcastStop_Click(object sender, RoutedEventArgs e) => await StopBroadcastAsync();
@@ -163,5 +222,5 @@ public partial class MainWindow
         else if (session.RelayFailure is { } networkError) BroadcastStatusText.Text = "公网音乐上传已停止：" + networkError.GetBaseException().Message + " 请停止分享后检查网络并重试。";
         tray?.Update();
     }
-    private void BroadcastHelp_Click(object sender, RoutedEventArgs e) => ShowText("音乐房间", "选择播放器并播放音乐，点击“创建音乐房间”。上传确认后点击“邀请朋友”，你自己点“进入语音房间”。双方在浏览器里进入房间，主动点击开启麦克风后才能讲话；默认不开麦。\n\n房间最多 8 人。桌面伴奏开关和音量只控制传给房间的音乐，讲话不会自动压低伴奏。房间人声与麦克风在浏览器页面控制。主持人页面默认音乐 0%，避免与本机播放器重复。\n\n音乐为 48 kHz 立体声独立加密传输，默认 2.4 秒缓冲；人声使用另一路加密连接。两者延迟不同，没有精确同步或 100 ms 保证。使用耳机；朋友可分别调整音乐与人声音量。\n\n点击关闭房间会停止上传并撤销链接，断网未撤销时最多 120 秒过期。最小化到托盘会继续，启动软件不会自动开房或开麦。\n\n需要配置新版 HTTPS 中继。免费托管受休眠、带宽与性能限制。没有发送配置时，兼容的临时链接只支持音乐收听，不能用于房间语音。邀请链接含房间密钥，只发给指定朋友。");
+    private void BroadcastHelp_Click(object sender, RoutedEventArgs e) => ShowText("音乐房间", "选择播放器并播放音乐，点击“创建音乐房间”。上传确认后点击“邀请朋友”，你自己点“进入语音房间”。双方在浏览器里进入房间，主动点击开启麦克风后才能讲话；默认不开麦。\n\n房间最多 8 人。桌面伴奏开关和音量只控制传给房间的音乐，讲话不会自动压低伴奏。房间人声与麦克风在浏览器页面控制。主持人页面默认音乐 0%，避免与本机播放器重复。\n\n音乐为 48 kHz 立体声独立加密传输，默认 2.4 秒缓冲；人声使用另一路加密连接。两者延迟不同，没有精确同步或 100 ms 保证。使用耳机；朋友可分别调整音乐与人声音量。\n\n点击关闭房间会停止上传并撤销链接，断网未撤销时最多 120 秒过期。最小化到托盘会继续，启动软件不会自动开房或开麦。\n\n需要配置新版 HTTPS 中继。免费托管受休眠、带宽与性能限制。没有发送配置时请先导入；不会自动尝试临时链接或开启音频捕获。邀请链接含房间密钥，只发给指定朋友。");
 }
