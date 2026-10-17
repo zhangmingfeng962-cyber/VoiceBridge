@@ -10,18 +10,25 @@ public partial class MainWindow
     private CancellationTokenSource? broadcastCancellation;
     private Task? broadcastTask, broadcastStopTask;
     private bool broadcastBusy, broadcastStopping;
+    private bool broadcastMusicEnabled;
     private bool BroadcastActive => broadcast is not null || broadcastBusy || broadcastStopping;
 
     private void InitializeSharing()
     {
         BroadcastPlayerBox.ItemsSource = MusicPlayers.All;
         BroadcastPlayerBox.SelectedItem = MusicPlayers.GetOrDefault(settings.MusicPlayerId);
+        BroadcastVolumeSlider.Value = settings.BroadcastMusicVolume;
+        UpdateBroadcastVolume();
         BroadcastQuickCheck.Content = RelayProfile.IsConfigured ? "启用跨网收听（使用本机已配置的 HTTPS 音乐中继）" : "启用跨网收听（未配置中继时尝试临时链接）";
         UpdateBroadcastControls();
     }
     private void UpdateBroadcastControls()
     {
-        BroadcastStartButton.IsEnabled = !BroadcastActive && !busy && !closing && supported;
+        BroadcastStartButton.IsEnabled = !broadcastStopping && !busy && !closing && supported;
+        BroadcastStartButton.Content = broadcastStopping ? "正在关闭房间…" : BroadcastActive ? "关闭房间" : "创建音乐房间";
+        BroadcastMusicButton.IsEnabled = broadcast is not null && !broadcastStopping && !closing;
+        BroadcastMusicButton.Content = broadcastMusicEnabled && BroadcastActive ? "伴奏：开" : "伴奏：关";
+        BroadcastRoomButton.IsEnabled = broadcast?.UsesRelay == true && broadcast.PublicLink is not null && !broadcastBusy && !closing;
         BroadcastStopButton.IsEnabled = BroadcastActive && !broadcastStopping && !closing;
         BroadcastPlayerBox.IsEnabled = BroadcastSeparateCheck.IsEnabled = BroadcastQuickCheck.IsEnabled = !BroadcastActive && !closing;
         BroadcastCopyButton.IsEnabled = broadcast?.PublicLink is not null && !broadcastBusy && !closing;
@@ -30,6 +37,7 @@ public partial class MainWindow
     }
     private async void BroadcastStart_Click(object sender, RoutedEventArgs e)
     {
+        if (BroadcastActive) { await StopBroadcastAsync(); return; }
         if (BroadcastActive || busy || closing || !supported) return;
         var player = BroadcastPlayerBox.SelectedItem as MusicPlayer ?? MusicPlayers.QQMusic;
         bool internet = BroadcastQuickCheck.IsChecked == true, separate = BroadcastSeparateCheck.IsChecked == true;
@@ -41,7 +49,8 @@ public partial class MainWindow
     }
     private async Task StartBroadcastAsync(string playerId, bool internet, bool separate, CancellationToken token)
     {
-        var session = new MusicBroadcastSession(); broadcast = session;
+        var session = new MusicBroadcastSession(); broadcast = session; broadcastMusicEnabled = true;
+        UpdateBroadcastVolume();
         try
         {
             if (separate && sendingMusic) await SetSourcesAsync(sendingMicrophone, false);
@@ -56,8 +65,8 @@ public partial class MainWindow
                 var progress = new Progress<string>(message => { if (ReferenceEquals(broadcast, session)) BroadcastStatusText.Text = message; });
                 if (RelayProfile.IsConfigured) await session.CreateRelayLinkAsync(playerId, progress, token);
                 else await session.CreateInternetLinkAsync(progress, token);
-                BroadcastLinkBox.Text = session.PublicLink!;
-                BroadcastStatusText.Text = session.UsesRelay ? "已通过 HTTPS 中继确认首段加密音乐上传。复制完整链接给朋友，对方用浏览器点击“开始收听”；人声继续走原通话。" : "临时收听链接已建立。复制完整链接给朋友，对方点“开始收听”；实际跨网音质仍需对方确认。";
+                BroadcastLinkBox.Text = RoomLink(session);
+                BroadcastStatusText.Text = session.UsesRelay ? "音乐房间已就绪。复制邀请给朋友，你点击“进入语音房间”；双方进房间后可单独开启麦克风，伴奏不会经过人声降噪。" : "临时音乐链接已建立；此旧连接仅支持收听，语音房间需要配置新版 HTTPS 中继。";
             }
             else BroadcastStatusText.Text = "本机分享已开始。可本机试听，或在高级选项接入自己的 HTTPS 反向代理。";
         }
@@ -80,6 +89,7 @@ public partial class MainWindow
         broadcastCancellation?.Cancel();
         if (broadcastTask is { } pending) { try { await pending; } catch (Exception ex) { Log.Write(ex.GetType().Name); } }
         var session = broadcast; bool wasRelay = session?.UsesRelay == true; broadcast = null;
+        broadcastMusicEnabled = false;
         if (session is not null)
         {
             try { await session.DisposeAsync(); }
@@ -99,9 +109,30 @@ public partial class MainWindow
     }
     private void BroadcastCopy_Click(object sender, RoutedEventArgs e)
     {
-        if (broadcast?.PublicLink is not { } link) return;
+        if (broadcast?.PublicLink is null) return;
+        string link = RoomLink(broadcast);
         try { System.Windows.Clipboard.SetText(link); BroadcastStatusText.Text = "完整收听链接已复制，含解密 / 收听密钥。请只发给指定朋友；停止时会撤销，断网时最迟 2 分钟过期。"; }
         catch (Exception ex) { BroadcastStatusText.Text = "无法访问剪贴板：" + ex.GetBaseException().Message; }
+    }
+    private static string RoomLink(MusicBroadcastSession session) => session.UsesRelay ? session.PublicLink!.Replace("/listen/", "/room/", StringComparison.Ordinal) : session.PublicLink!;
+    private void BroadcastRoom_Click(object sender, RoutedEventArgs e)
+    {
+        if (broadcast?.UsesRelay != true || broadcast.PublicLink is null) return;
+        try { Open(RoomLink(broadcast) + ".host"); }
+        catch (Exception ex) { BroadcastStatusText.Text = ex.GetBaseException().Message; }
+    }
+    private void BroadcastMusic_Click(object sender, RoutedEventArgs e)
+    {
+        if (broadcast is null) return;
+        broadcastMusicEnabled = !broadcastMusicEnabled; UpdateBroadcastVolume(); UpdateBroadcastControls();
+    }
+    private void BroadcastVolume_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+    { if (IsInitialized) UpdateBroadcastVolume(); }
+    private void UpdateBroadcastVolume()
+    {
+        settings.BroadcastMusicVolume = BroadcastVolumeSlider.Value;
+        BroadcastVolumeValue.Text = $"{BroadcastVolumeSlider.Value:0}%";
+        if (broadcast is { } session) { session.Gain.Volume = (float)BroadcastVolumeSlider.Value / 100; session.Gain.Muted = !broadcastMusicEnabled; }
     }
     private void BroadcastPreview_Click(object sender, RoutedEventArgs e)
     {
@@ -132,5 +163,5 @@ public partial class MainWindow
         else if (session.RelayFailure is { } networkError) BroadcastStatusText.Text = "公网音乐上传已停止：" + networkError.GetBaseException().Message + " 请停止分享后检查网络并重试。";
         tray?.Update();
     }
-    private void BroadcastHelp_Click(object sender, RoutedEventArgs e) => ShowText("独立音乐分享", RelayProfile.IsConfigured ? "选择音乐播放器并开始播放，点击“开始独立分享”。软件确认首段加密上传后，复制完整链接给朋友；对方用新版 Edge / Chrome 打开并点“开始收听”，无需账号或麦克风权限。\n\n人声继续通过 QQ、微信或游戏。开始时默认关闭下方频道音乐，避免重复；独立链接不采集麦克风。\n\n音乐以未压缩 48 kHz 双声道 PCM 加密传输。接收缓冲可选 1.2 / 2.4 / 4.8 秒，默认 2.4 秒，总延迟还包括分段和网络，不能达到端到端 100 ms。页面不做降噪、自动增益或人声门限。\n\n收起到托盘会继续分享。停止会撤销房间；若此时断网，旧链接在最后上传后最多 120 秒过期，已缓冲的片段可能继续播放一小段。\n\n当前 Windows 用户的发送配置与公共 EXE 分开保存，不能把发送凭据公开到 GitHub。朋友的完整链接含本次收听 / 解密密钥，请只发给指定朋友。\n\n免费中继有休眠、流量和稳定性限制；首次冷启动可能等约一分钟。不能保证所有网络零断流。" : "1. 在独立分享区选择 QQ音乐、网易云音乐或酷狗音乐，并开始播放。\n2. 点击“开始独立分享”。默认关闭送进语音频道的音乐，保持正常人声交流。独立通道不采集麦克风。\n3. 等临时链接建立后，复制完整链接给朋友。朋友用新版 Edge / Chrome 打开并点击“开始收听”，无需麦克风权限。建议戴耳机。\n4. 接收端可选 120 / 240 / 480 ms 缓冲并调节收听音量。更大缓冲增加延迟，不能弥补持续带宽不足。\n5. 停止独立分享、全部停止或从托盘退出会断开收听连接，旧链接失效；重新开始会生成新密钥。收起到托盘会继续分享，开机启动不会自动分享。\n\n未压缩 48 kHz 双声道 float32，每位收听者约需 3.1 Mbps 上行，另有协议开销。浏览器有少量时钟漂移校正和断流淡入淡出，不添加人声降噪或自动增益。不能保证网络零中断、端到端低于 100 ms 或所有设备听感完全相同。\n\n临时互联网链接使用官方 cloudflared 2026.10.1，首次下载约 53 MB 并验证 SHA-256。无需管理员、Cloudflare 账号或端口转发，不安装系统服务。音频经 Cloudflare 转发，不是端到端加密；不要分享私密内容。临时服务用于测试，无持续可用保证。链接持有者可收听，请勿公开转发。\n\n固定地址：取消临时链接、开始分享，在高级区查看本机端口。将自己的 HTTPS 反向代理转发到该地址，支持 /audio WebSocket、关闭缓存和响应缓冲，然后填根地址。软件不会自动配置外部服务器，也不开放本机文件、麦克风或控制接口。");
+    private void BroadcastHelp_Click(object sender, RoutedEventArgs e) => ShowText("音乐房间", "选择播放器并播放音乐，点击“创建音乐房间”。上传确认后点击“邀请朋友”，你自己点“进入语音房间”。双方在浏览器里进入房间，主动点击开启麦克风后才能讲话；默认不开麦。\n\n房间最多 8 人。桌面伴奏开关和音量只控制传给房间的音乐，讲话不会自动压低伴奏。房间人声与麦克风在浏览器页面控制。主持人页面默认音乐 0%，避免与本机播放器重复。\n\n音乐为 48 kHz 立体声独立加密传输，默认 2.4 秒缓冲；人声使用另一路加密连接。两者延迟不同，没有精确同步或 100 ms 保证。使用耳机；朋友可分别调整音乐与人声音量。\n\n点击关闭房间会停止上传并撤销链接，断网未撤销时最多 120 秒过期。最小化到托盘会继续，启动软件不会自动开房或开麦。\n\n需要配置新版 HTTPS 中继。免费托管受休眠、带宽与性能限制。没有发送配置时，兼容的临时链接只支持音乐收听，不能用于房间语音。邀请链接含房间密钥，只发给指定朋友。");
 }

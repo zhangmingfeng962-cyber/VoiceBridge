@@ -55,8 +55,8 @@ public partial class MainWindow : Window
                 {
                     tray = new TrayController(GetTrayState, RestoreFromTray,
                         () => SetSourcesAsync(!sendingMicrophone, sendingMusic),
-                        () => SetSourcesAsync(sendingMicrophone, !sendingMusic),
-                        amount => MusicSlider.Value = Math.Clamp(MusicSlider.Value + amount, 0, 100),
+                        ToggleCurrentMusicAsync,
+                        AdjustCurrentMusic,
                         StopAllAsync, RequestExit);
                 }
                 catch (Exception ex) { Log.Write(ex.ToString()); StatusText.Text = "托盘暂不可用，关闭窗口将正常退出。"; }
@@ -152,9 +152,19 @@ public partial class MainWindow : Window
     private async void Microphone_Click(object sender, RoutedEventArgs e) => await SetSourcesAsync(!sendingMicrophone, sendingMusic);
     private async void OnHotkey(int id)
     {
-        if (id == 1) await SetSourcesAsync(sendingMicrophone, !sendingMusic);
+        if (id == 1) await ToggleCurrentMusicAsync();
         else if (id == 4) await SetSourcesAsync(!sendingMicrophone, sendingMusic);
-        else MusicSlider.Value = Math.Clamp(MusicSlider.Value + (id == 2 ? 5 : -5), 0, 100);
+        else AdjustCurrentMusic(id == 2 ? 5 : -5);
+    }
+    private Task ToggleCurrentMusicAsync()
+    {
+        if (BroadcastActive) { BroadcastMusic_Click(this, new RoutedEventArgs()); return Task.CompletedTask; }
+        return SetSourcesAsync(sendingMicrophone, !sendingMusic);
+    }
+    private void AdjustCurrentMusic(int amount)
+    {
+        var slider = BroadcastActive ? BroadcastVolumeSlider : MusicSlider;
+        slider.Value = Math.Clamp(slider.Value + amount, 0, 100);
     }
     private void Volume_Changed(object sender, RoutedPropertyChangedEventArgs<double> e) { if (IsInitialized) { UpdateVolumes(); CaptureScenarioControls(); UpdateScenarioStatus(); } }
     private void UpdateVolumes()
@@ -204,7 +214,7 @@ public partial class MainWindow : Window
         tray?.Update();
         CaptureScenarioControls(); UpdateScenarioStatus();
     }
-    private TrayState GetTrayState() => new(sendingMicrophone, sendingMusic, (int)MusicSlider.Value, !closing && MicrophoneButton.IsEnabled, engine.Running || BroadcastActive, busy || closing, SelectedMusicPlayer.Name, BroadcastActive);
+    private TrayState GetTrayState() => new(sendingMicrophone, BroadcastActive ? broadcastMusicEnabled : sendingMusic, (int)(BroadcastActive ? BroadcastVolumeSlider.Value : MusicSlider.Value), !closing && (BroadcastActive || MicrophoneButton.IsEnabled), engine.Running || BroadcastActive, busy || closing, BroadcastActive ? "房间伴奏" : SelectedMusicPlayer.Name, BroadcastActive);
     private void SaveSettings()
     {
         if (!persistSettingsOnClose) return;

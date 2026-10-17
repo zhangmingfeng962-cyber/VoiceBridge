@@ -34,11 +34,18 @@ async function load(bucket,id,ctx) {
 async function authorize(request,expected) {
   const token=bearer(request);if(!TOKEN.test(token)||!equal(await digest(token),expected))throw new HttpError(403,'Invitation invalid');
 }
+export async function authorizeRoom(request,env,ctx) {
+  const id=new URL(request.url).pathname.match(/^\/api\/rooms\/([a-f0-9]{32})/)?.[1];
+  if(!id)throw new HttpError(404,'Not found');
+  const {meta}=await load(env.BUCKET,id,ctx);await authorize(request,meta.listenHash);return meta;
+}
 async function handle(request,env,ctx) {
   const url=new URL(request.url), path=url.pathname;
+  if(request.method==='GET'&&/^\/room\/[a-f0-9]{32}$/.test(path))return new Response(assets['room.html'],{headers:{...headers,'Permissions-Policy':'microphone=(self), camera=(), display-capture=()','Content-Type':'text/html; charset=utf-8'}});
+  if(request.method==='GET'&&['/room.js','/voice-worklet.js'].includes(path))return new Response(assets[path.slice(1)],{headers:{...headers,'Content-Type':'text/javascript; charset=utf-8'}});
   if(request.method==='GET' && (path==='/'||/^\/listen\/[a-f0-9]{32}$/.test(path)))return new Response(assets['receiver.html'],{headers:{...headers,'Content-Type':'text/html; charset=utf-8'}});
   if(request.method==='GET' && ['/receiver.js','/pcm-worklet.js'].includes(path))return new Response(assets[path.slice(1)],{headers:{...headers,'Content-Type':'text/javascript; charset=utf-8'}});
-  if(path==='/health'&&request.method==='GET')return json({service:'VoiceBridge encrypted music relay',version:1,ready:!!env.BUCKET&&!!env.PUBLISH_KEY_HASH,chunkMs:400,sampleRate:48000,channels:2});
+  if(path==='/health'&&request.method==='GET')return json({service:'VoiceBridge encrypted music relay',version:2,voiceRooms:true,ready:!!env.BUCKET&&!!env.PUBLISH_KEY_HASH,chunkMs:400,sampleRate:48000,channels:2});
   if(!env.BUCKET||!env.PUBLISH_KEY_HASH)throw new HttpError(503,'Relay is not configured');
   const origin=request.headers.get('Origin');if(origin&&origin!==url.origin)throw new HttpError(403,'Origin rejected');
   if(path==='/api/rooms' && request.method==='POST') {

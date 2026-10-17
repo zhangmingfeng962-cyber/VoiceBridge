@@ -47,10 +47,11 @@ public sealed class TrayController : IDisposable
         microphone.Checked = state.MicrophoneOn;
         music.Checked = state.MusicOn;
         microphone.Enabled = music.Enabled = state.CanChange;
+        if (state.IndependentMusic) { microphone.Text = "虚拟麦克风人声（房间人声在页面控制）"; }
         volumeUp.Enabled = !state.Busy && state.MusicVolume < 100;
         volumeDown.Enabled = !state.Busy && state.MusicVolume > 0;
         stop.Enabled = !state.Busy && state.Running;
-        independent.Text = state.IndependentMusic ? "独立音乐链接：开（收起后继续）" : "独立音乐链接：关";
+        independent.Text = state.IndependentMusic ? "音乐房间：开（收起后继续）" : "音乐房间：关";
         icon.Text = $"VoiceBridge · 人声{(state.MicrophoneOn ? "开" : "关")} · 频道音乐{(state.MusicOn ? "开" : "关")} · 链接{(state.IndependentMusic ? "开" : "关")}";
     }
 

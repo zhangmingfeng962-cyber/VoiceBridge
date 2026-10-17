@@ -8,6 +8,7 @@ public sealed class Settings
     public string? CableId { get; set; }
     public double MicrophoneVolume { get; set; } = 100;
     public double MusicVolume { get; set; } = 35;
+    public double BroadcastMusicVolume { get; set; } = 100;
     public string MusicPlayerId { get; set; } = MusicPlayers.QQMusicId;
     public string ScenarioId { get; set; } = "general";
     public Dictionary<string, ScenarioAudioProfile> ScenarioProfiles { get; set; } = new();
@@ -55,6 +56,7 @@ public sealed class Settings
     { foreach (var profile in ScenarioProfiles.Values) if (profile is not null) profile.PeerConfirmedSignature = null; }
     public void Normalize()
     {
+        BroadcastMusicVolume = double.IsFinite(BroadcastMusicVolume) ? Math.Clamp(BroadcastMusicVolume, 0, 100) : 100;
         ScenarioId = Scenarios.Get(ScenarioId).Id;
         ScenarioProfiles ??= new();
         var normalized = new Dictionary<string, ScenarioAudioProfile>();

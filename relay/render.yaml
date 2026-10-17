@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     rootDir: relay
-    buildCommand: node --version
+    buildCommand: npm ci --omit=dev --ignore-scripts
     startCommand: node server.mjs
     healthCheckPath: /health
     envVars:

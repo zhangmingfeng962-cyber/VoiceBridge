@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  const el=id=>document.getElementById(id), room=location.pathname.match(/^\/listen\/([a-f0-9]{32})$/)?.[1];
+  const el=id=>document.getElementById(id), room=location.pathname.match(/^\/(?:listen|room)\/([a-f0-9]{32})$/)?.[1];
   const pieces=location.hash.slice(1).split('.'), token=pieces[0], keyHex=pieces[1];
   let context,node,gain,controller,running=false,epoch=0,received=0,after=-1,cryptoKey,lastPacketAt=0;
   const status=(text,live=false)=>{el('status').textContent=text;el('dot').classList.toggle('live',live);};

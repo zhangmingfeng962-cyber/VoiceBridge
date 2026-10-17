@@ -17,3 +17,4 @@ audio-routes-before-*.json
 ducking-before-*.json
 relay-profile*.json
 *.vbrelay
+**/node_modules/

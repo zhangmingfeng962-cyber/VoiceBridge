@@ -12,6 +12,7 @@ public static class UiPreview
         var window = new MainWindow(persistSettingsOnClose: false, enableTray: false,
             showTrayNotifications: false, initialSettings: new Settings { MusicPlayerId = MusicPlayers.NetEase.Id, ScenarioId = "wechat" }, useAudioHardware: false);
         ((System.Windows.Controls.Expander)window.FindName("ScenarioExpander")).IsExpanded = expandScenario;
+        ((System.Windows.Controls.Expander)window.FindName("LegacyExpander")).IsExpanded = expandScenario;
         var microphone = (System.Windows.Controls.ComboBox)window.FindName("MicrophoneBox");
         microphone.ItemsSource = new[] { new Audio.DeviceChoice("preview-microphone", "示例：真实麦克风") };
         microphone.SelectedIndex = 0;
@@ -23,7 +24,7 @@ public static class UiPreview
         ((System.Windows.Controls.TextBlock)window.FindName("StartupStatusText")).Text = "界面预览 · 不修改开机自启动或音频状态。";
         var content = (System.Windows.Controls.ScrollViewer)window.Content;
         content.Background = window.Background;
-        int height = expandScenario ? 2000 : 1650;
+        int height = expandScenario ? 2200 : 760;
         content.Measure(new Size(850, height));
         content.Arrange(new Rect(0, 0, 850, height));
         content.UpdateLayout();

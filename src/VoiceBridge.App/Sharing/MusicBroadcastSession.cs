@@ -21,6 +21,7 @@ public sealed class MusicBroadcastSession : IAsyncDisposable
     private int disposed;
     private string status = "未开始";
     public MusicLinkServer Server { get; } = new();
+    public BroadcastGain Gain { get; } = new();
     public string? PublicLink { get; private set; }
     public Exception? Failure => Volatile.Read(ref failure);
     public bool TunnelExited => tunnel?.HasExited == true;
@@ -92,6 +93,7 @@ public sealed class MusicBroadcastSession : IAsyncDisposable
                 long invalid = 0, overloaded = 0;
                 foreach (float value in samples) { if (!float.IsFinite(value)) invalid++; else if (Math.Abs(value) > 1) overloaded++; }
                 Interlocked.Add(ref invalidSamples, invalid); Interlocked.Add(ref overloadedSamples, overloaded);
+                Gain.Apply(samples);
                 Server.Publish(MusicPacket.Encode(samples, sequence++)); Interlocked.Increment(ref packets);
                 next += 10;
                 // After a suspended/overloaded machine, resume live rather than replaying a burst of old audio.
