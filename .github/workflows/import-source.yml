@@ -19,8 +19,8 @@ jobs:
         run: |
           import hashlib, pathlib, shutil, subprocess, sys, tempfile, zipfile
           root = pathlib.Path.cwd().resolve()
-          archive = root / 'VoiceBridge-v0.8.1-source.zip'
-          expected = '3f584709e267bb19e93ea51658c5e02be32e51e2ce4f134dc07510725e1558fa'
+          archive = root / 'VoiceBridge-v0.8.2-source.zip'
+          expected = '908e4886252a1ede1092b10aa0aed6470edb29aba82268f9ded619b245db18ab'
           actual = hashlib.sha256(archive.read_bytes()).hexdigest()
           if actual != expected:
               raise RuntimeError('The source archive checksum does not match the reviewed release.')
@@ -56,6 +56,6 @@ jobs:
           subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], check=True)
           subprocess.run(['git', 'add', '--all'], check=True)
           if subprocess.run(['git', 'diff', '--cached', '--quiet']).returncode:
-              subprocess.run(['git', 'commit', '-m', 'Add explicit room microphone selection and reject virtual loopbacks'], check=True)
+              subprocess.run(['git', 'commit', '-m', 'Fix standalone relay configuration import and document domestic hosting'], check=True)
               subprocess.run(['git', 'push', 'origin', 'HEAD:main'], check=True)
           print(f'Imported {count} reviewed source files.')
