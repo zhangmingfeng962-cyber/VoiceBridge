@@ -1,61 +1,65 @@
 name: Import verified source archive
-
 on:
   workflow_dispatch:
   push:
     paths:
       - .github/workflows/import-source.yml
-
 permissions:
   contents: write
-
 jobs:
   import:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Verify and import the public source archive
+      - name: Verify and replace the room-only public source
         shell: python
         run: |
-          import hashlib, pathlib, shutil, subprocess, sys, tempfile, zipfile
+          import hashlib, pathlib, shutil, stat, subprocess, sys, tempfile, zipfile
           root = pathlib.Path.cwd().resolve()
-          archive = root / 'VoiceBridge-v0.8.2-source.zip'
-          expected = '908e4886252a1ede1092b10aa0aed6470edb29aba82268f9ded619b245db18ab'
-          actual = hashlib.sha256(archive.read_bytes()).hexdigest()
-          if actual != expected:
-              raise RuntimeError('The source archive checksum does not match the reviewed release.')
+          archive = root / 'VoiceBridge-v0.9.0-source.zip'
+          expected = '29e5b29fd2fa832c5b5b98af8a2b423749d25b718b50550cf60dff150100949a'
+          if hashlib.sha256(archive.read_bytes()).hexdigest() != expected:
+              raise RuntimeError('Source archive checksum mismatch.')
           marker = root / '.source-import-sha256'
           if marker.is_file() and marker.read_text().strip() == expected:
-              print('This verified source was already imported; preserving subsequent edits.')
+              print('Already imported; preserving subsequent edits.')
               sys.exit(0)
-          allowed = {'.gitattributes', '.gitignore', 'CHANGELOG.md', 'Directory.Build.props', 'global.json', 'LICENSE', 'README.md', 'README.zh-CN.md', 'VoiceBridge.sln', 'src', 'tests', 'scripts', 'third-party', 'docs', 'relay'}
+          allowed = {'.gitattributes', '.gitignore', 'CHANGELOG.md', 'Directory.Build.props', 'global.json', 'LICENSE', 'README.md', 'VoiceBridge.sln', 'src', 'tests', 'scripts', 'third-party', 'docs', 'relay'}
           with tempfile.TemporaryDirectory() as temporary:
               unpacked = pathlib.Path(temporary).resolve()
-              with zipfile.ZipFile(archive) as source_zip:
-                  for member in source_zip.infolist():
+              with zipfile.ZipFile(archive) as package:
+                  for member in package.infolist():
                       target = (unpacked / member.filename).resolve()
-                      if not target.is_relative_to(unpacked):
-                          raise RuntimeError('Unsafe path in source archive.')
-                  source_zip.extractall(unpacked)
+                      if not target.is_relative_to(unpacked) or stat.S_ISLNK(member.external_attr >> 16):
+                          raise RuntimeError('Unsafe archive path.')
+                  package.extractall(unpacked)
               source = unpacked / 'VoiceBridge'
-              if not (source / 'VoiceBridge.sln').is_file():
-                  raise RuntimeError('The complete project is missing from the archive.')
-              count = 0
-              for file in source.rglob('*'):
-                  if not file.is_file():
-                      continue
+              files = [file for file in source.rglob('*') if file.is_file()]
+              if len(files) != 56 or not (source / 'VoiceBridge.sln').is_file():
+                  raise RuntimeError('Complete reviewed project missing.')
+              for file in files:
                   relative = file.relative_to(source)
-                  if relative.parts[0] not in allowed or any(part in {'.git', 'bin', 'obj', 'artifacts'} for part in relative.parts):
-                      raise RuntimeError('Unexpected file in source archive.')
-                  destination = root / relative
+                  if relative.parts[0] not in allowed or any(part in {'.git', 'bin', 'obj', 'node_modules', 'artifacts'} for part in relative.parts) or file.suffix in {'.vbrelay', '.exe', '.wav', '.mp3'}:
+                      raise RuntimeError('Unexpected file in public source.')
+              # Validate everything before replacing only Git-recoverable managed roots.
+              # Preserve .github, release archives and unrelated repository files.
+              for name in allowed | {'README.zh-CN.md'}:
+                  target = (root / name).resolve()
+                  if target.parent != root:
+                      raise RuntimeError('Unsafe replacement root.')
+                  if target.is_dir():
+                      shutil.rmtree(target)
+                  elif target.is_file():
+                      target.unlink()
+              for file in files:
+                  destination = root / file.relative_to(source)
                   destination.parent.mkdir(parents=True, exist_ok=True)
                   shutil.copyfile(file, destination)
-                  count += 1
           marker.write_text(expected + '\n')
           subprocess.run(['git', 'config', 'user.name', 'github-actions[bot]'], check=True)
           subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], check=True)
           subprocess.run(['git', 'add', '--all'], check=True)
           if subprocess.run(['git', 'diff', '--cached', '--quiet']).returncode:
-              subprocess.run(['git', 'commit', '-m', 'Fix standalone relay configuration import and document domestic hosting'], check=True)
+              subprocess.run(['git', 'commit', '-m', 'Replace legacy audio routes with room-only multi-source Opus sharing'], check=True)
               subprocess.run(['git', 'push', 'origin', 'HEAD:main'], check=True)
-          print(f'Imported {count} reviewed source files.')
+          print(f'Imported {len(files)} verified room-only source files.')
