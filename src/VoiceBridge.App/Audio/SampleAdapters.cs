@@ -25,6 +25,7 @@ public sealed class CaptureInput
     public IFloatSource Stereo { get; }
     public CaptureInput(WaveFormat format)
     {
+        if (format is WaveFormatExtensible extensible) format = extensible.ToStandardWaveFormat();
         this.format = format;
         if (format.Channels is < 1 or > 2) throw new NotSupportedException("请在 Windows 中将麦克风设置为单声道或双声道。");
         if (format.Encoding != WaveFormatEncoding.IeeeFloat && format.Encoding != WaveFormatEncoding.Pcm)

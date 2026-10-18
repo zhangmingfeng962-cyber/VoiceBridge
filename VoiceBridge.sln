@@ -13,8 +13,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{637748BA
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoiceBridge.Tests", "tests\VoiceBridge.Tests\VoiceBridge.Tests.csproj", "{DD70C0F2-5240-433D-AE07-CCA799456475}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoiceBridge.AudioFixture", "tests\VoiceBridge.AudioFixture\VoiceBridge.AudioFixture.csproj", "{9AAC3B82-C040-441F-BF13-87049F9CBC82}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -36,15 +34,10 @@ Global
 		{DD70C0F2-5240-433D-AE07-CCA799456475}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{DD70C0F2-5240-433D-AE07-CCA799456475}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{DD70C0F2-5240-433D-AE07-CCA799456475}.Release|Any CPU.Build.0 = Release|Any CPU
-		{9AAC3B82-C040-441F-BF13-87049F9CBC82}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{9AAC3B82-C040-441F-BF13-87049F9CBC82}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{9AAC3B82-C040-441F-BF13-87049F9CBC82}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{9AAC3B82-C040-441F-BF13-87049F9CBC82}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{E302158A-84D6-4FA6-9223-5823D36488FD} = {DFAC3D74-E199-452F-AF69-EDC0896C5021}
 		{E190382F-9F76-4EC6-9062-26CA1F3A9063} = {DFAC3D74-E199-452F-AF69-EDC0896C5021}
 		{DD70C0F2-5240-433D-AE07-CCA799456475} = {637748BA-36B0-49E0-AC4E-CA9B230F7C47}
-		{9AAC3B82-C040-441F-BF13-87049F9CBC82} = {637748BA-36B0-49E0-AC4E-CA9B230F7C47}
 	EndGlobalSection
 EndGlobal

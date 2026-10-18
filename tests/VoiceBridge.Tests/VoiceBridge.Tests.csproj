@@ -1,14 +1,1 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
-    <IsPackable>false</IsPackable><IsTestProject>true</IsTestProject>
-    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-  </PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
-    <PackageReference Include="xunit" Version="2.9.2" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2"><IncludeAssets>runtime;build;native;contentfiles;analyzers;buildtransitive</IncludeAssets><PrivateAssets>all</PrivateAssets></PackageReference>
-    <ProjectReference Include="../../src/VoiceBridge.Core/VoiceBridge.Core.csproj" />
-    <ProjectReference Include="../../src/VoiceBridge.App/VoiceBridge.App.csproj" />
-  </ItemGroup>
-</Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0-windows10.0.19041.0</TargetFramework><IsPackable>false</IsPackable><IsTestProject>true</IsTestProject><UseWPF>true</UseWPF><RestorePackagesWithLockFile>true</RestorePackagesWithLockFile></PropertyGroup><ItemGroup><PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1"/><PackageReference Include="xunit" Version="2.9.2"/><PackageReference Include="xunit.runner.visualstudio" Version="2.8.2"><PrivateAssets>all</PrivateAssets></PackageReference><ProjectReference Include="../../src/VoiceBridge.App/VoiceBridge.App.csproj"/></ItemGroup></Project>
