@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.1 — 2026-10-19
+
+- Keep disabled Windows buttons dark and readable.
+- Built-in domestic public room service; remove import UI, private profile reader and profile-generation script. Anonymous creation is opt-in on the server and rate/capacity limited.
+- Edit your nickname inside the web room without rejoining.
+- Local member join/leave tones follow listening volume and never enter the music stream directly.
+- Open the microphone on room entry; first controller attachment preserves it, manual mute remains respected, replacement/closed controllers still mute.
+
+
 ## 0.9.0 — 2026-10-18
 
 - Room-only Windows client and web control page; removes all legacy virtual-device/scenario/tray/startup/tunnel features from this version.

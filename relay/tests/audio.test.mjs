@@ -28,3 +28,8 @@ test('PTT key release invalidates queued encoded voice',async()=>{
  const {BrowserAudio}=await import('../web/audio.js');const audio=new BrowserAudio(()=>{},()=>{},()=>{});audio.options={...audio.options,microphone:true,talkMode:'ptt',talkKey:86};
  assert.equal(audio.gate(),false);audio.keyDown(86);const sending=audio.micEpoch;assert.equal(audio.gate(),true);audio.keyUp();assert.equal(audio.gate(),false);assert.ok(audio.micEpoch>sending);
 });
+test('member join/leave sounds follow identity changes, never nickname or microphone updates',async()=>{
+ const {membershipCues}=await import('../web/room-events.js');
+ assert.deepEqual(membershipCues([],[{id:'a'}],false),[true]);assert.deepEqual(membershipCues([{id:'a',name:'old'}],[{id:'a',name:'new',microphone:true}],true),[]);
+ assert.deepEqual(membershipCues([{id:'a'}],[{id:'a'},{id:'b'}],true),[true]);assert.deepEqual(membershipCues([{id:'a'},{id:'b'}],[{id:'a'}],true),[false]);
+});

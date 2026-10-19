@@ -28,3 +28,22 @@ test('room limit, replay and foreign origins are enforced',async()=>{const servi
  a.socket.send(JSON.stringify({type:'flags',microphone:false,music:true}));const repeated=audio();a.socket.send(repeated);const replay=once(a.socket,'close');a.socket.send(repeated);assert.equal((await replay)[0],4003);
  const foreign=new WebSocket(service.url.replace('http:','ws:')+`/api/rooms/${room.id}/voice`,{origin:'https://foreign.example'});await assert.rejects(once(foreign,'open'));foreign.terminate();
 }finally{clients.forEach(s=>s.terminate());await service.stop();}});
+test('public build creates rooms without a sender key, with bounded creation and owner-only deletion',async()=>{
+ const disabled=await startServer({port:0,host:'127.0.0.1',publishKeyHash:hash});try{assert.equal((await fetch(disabled.url+'/api/rooms',{method:'POST',body:'{}'})).status,403);}finally{await disabled.stop();}
+ const service=await startServer({port:0,host:'127.0.0.1',publishKeyHash:hash,publicRooms:true});try{
+ const response=await fetch(service.url+'/api/rooms',{method:'POST',body:'{}'});assert.equal(response.status,201);const room=await response.json();assert.equal((await fetch(service.url+`/api/rooms/${room.id}`,{method:'DELETE'})).status,403);
+ assert.equal((await fetch(service.url+`/api/rooms/${room.id}`,{method:'DELETE',headers:{Authorization:'Bearer '+room.writeToken}})).status,200);
+ for(let n=0;n<3;n++)assert.equal((await fetch(service.url+'/api/rooms',{method:'POST',body:'{}'})).status,201);
+ const limited=await fetch(service.url+'/api/rooms',{method:'POST',body:'{}'});assert.equal(limited.status,429);assert.equal(limited.headers.get('retry-after'),'60');
+ }finally{await service.stop();}
+});
+test('browser and paired controller rename only themselves; first controller preserves automatic microphone, replacement mutes',async()=>{
+ const service=await startServer({port:0,host:'127.0.0.1',publishKeyHash:hash}),clients=[];try{
+ const room=await create(service),desktop=await join(service,room,'desktop'),friend=await join(service,room);clients.push(desktop.socket,friend.socket);
+ desktop.socket.send(JSON.stringify({type:'flags',microphone:true,music:false}));await friend.next(m=>m.type==='members'&&m.members.some(p=>p.id===desktop.id&&p.microphone));
+ const controller=await join(service,room,'controller',{memberId:desktop.id,controlToken:desktop.controlToken});clients.push(controller.socket);assert.equal(service.peers.get(desktop.id).microphone,true);
+ controller.socket.send(JSON.stringify({type:'rename',name:'主持人新昵称',memberId:friend.id}));let roster=await friend.next(m=>m.type==='members'&&m.members.some(p=>p.name==='主持人新昵称'));assert.equal(roster.members.find(p=>p.id===friend.id).name,'browser');
+ friend.socket.send(JSON.stringify({type:'rename',name:'朋友改名'}));roster=await controller.next(m=>m.type==='members'&&m.members.some(p=>p.name==='朋友改名'));assert.equal(roster.members.find(p=>p.id===desktop.id).name,'主持人新昵称');
+ const replacement=await join(service,room,'controller',{memberId:desktop.id,controlToken:desktop.controlToken});clients.push(replacement.socket);assert.equal(service.peers.get(desktop.id).microphone,false);
+ }finally{clients.forEach(s=>s.terminate());await service.stop();}
+});

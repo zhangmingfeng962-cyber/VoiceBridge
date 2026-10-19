@@ -8,7 +8,7 @@ using System.Text.Json;
 using System.Threading.Channels;
 using System.Windows;
 using VoiceBridge.App.Audio;
-using VoiceBridge.App.Sharing;
+using VoiceBridge.App.Room;
 using VoiceBridge.Core;
 
 namespace VoiceBridge.App;
@@ -39,10 +39,10 @@ public static class SelfTest
     private static async Task StreamAsync(string origin, string report)
     {
         using var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(120)); using var client = new HttpClient { BaseAddress = new Uri(origin), Timeout = TimeSpan.FromSeconds(12) };
-        string master;
+        string? master;
         if (new Uri(origin).IsLoopback) master = new string('1', 64);
-        else { var profile = RelayProfile.Load(); if (profile.Origin != origin) throw new InvalidOperationException("Diagnostic origin must match the configured relay."); master = profile.ReadPublishKey(); }
-        client.DefaultRequestHeaders.Authorization = new("Bearer", master);
+        else { if (origin != RoomService.DefaultOrigin) throw new InvalidOperationException("Diagnostic origin must match the built-in public relay."); master = null; }
+        if (master is not null) client.DefaultRequestHeaders.Authorization = new("Bearer", master);
         using var response = await client.PostAsync("/api/rooms", new StringContent("{}"), lifetime.Token); response.EnsureSuccessStatusCode(); using var created = JsonDocument.Parse(await response.Content.ReadAsStringAsync(lifetime.Token));
         string roomId = created.RootElement.GetProperty("id").GetString()!, writer = created.RootElement.GetProperty("writeToken").GetString()!, token = created.RootElement.GetProperty("listenToken").GetString()!;
         var invite = new RoomInvite(origin, roomId, token, RandomNumberGenerator.GetBytes(32)); var cipher = new RoomCipher(invite.Key, roomId);

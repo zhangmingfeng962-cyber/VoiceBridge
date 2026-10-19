@@ -8,7 +8,6 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using VoiceBridge.App.Audio;
-using VoiceBridge.App.Sharing;
 using VoiceBridge.Core;
 
 namespace VoiceBridge.App.Room;
@@ -28,7 +27,7 @@ public sealed class RoomClient : IAsyncDisposable
     private long appliedRevision;
     private readonly TaskCompletionSource joined = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private JsonElement members = JsonSerializer.SerializeToElement(Array.Empty<object>());
-    private bool disposed;
+    private bool disposed, seenRoster, hadController;
     private readonly object disposeGate = new();
     private Task? disposal;
     public RoomInvite Invite { get; private set; } = null!;
@@ -42,14 +41,14 @@ public sealed class RoomClient : IAsyncDisposable
     public RoomClient() => Audio = new(PublishAudio);
     public async Task CreateAsync(string name)
     {
-        var profile = RelayProfile.Load();
-        using var client = new HttpClient { BaseAddress = new Uri(profile.Origin), Timeout = TimeSpan.FromSeconds(15) };
+        string origin = RoomService.DefaultOrigin;
+        using var client = new HttpClient { BaseAddress = new Uri(origin), Timeout = TimeSpan.FromSeconds(15) };
         using var health = JsonDocument.Parse(await client.GetStringAsync("/health", stop.Token));
         if (!health.RootElement.TryGetProperty("protocol", out var version) || version.GetInt32() < 3) throw new InvalidOperationException("中继尚未升级到新版音乐房间。");
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", profile.ReadPublishKey());
-        using var created = await client.PostAsync("/api/rooms", new StringContent("{\"player\":\"room\"}", Encoding.UTF8, "application/json"), stop.Token); created.EnsureSuccessStatusCode();
+        client.DefaultRequestHeaders.Add("X-VoiceBridge-Client", "0.9.1");
+        using var created = await client.PostAsync("/api/rooms", new StringContent("{\"player\":\"room\"}", Encoding.UTF8, "application/json"), stop.Token); if ((int)created.StatusCode == 429) throw new InvalidOperationException("当前免费房间已满或建房过于频繁，请稍后重试。"); created.EnsureSuccessStatusCode();
         using var json = JsonDocument.Parse(await created.Content.ReadAsStringAsync(stop.Token)); var root = json.RootElement;
-        Invite = new(profile.Origin, root.GetProperty("id").GetString()!, root.GetProperty("listenToken").GetString()!, RandomNumberGenerator.GetBytes(32)); writer = root.GetProperty("writeToken").GetString();
+        Invite = new(origin, root.GetProperty("id").GetString()!, root.GetProperty("listenToken").GetString()!, RandomNumberGenerator.GetBytes(32)); writer = root.GetProperty("writeToken").GetString();
         await JoinAsync(Invite, name);
     }
     public async Task JoinAsync(RoomInvite invite, string name)
@@ -61,7 +60,7 @@ public sealed class RoomClient : IAsyncDisposable
         await socket.SendAsync(join.AsMemory(), WebSocketMessageType.Text, true, stop.Token);
         sender = Task.Run(SendLoopAsync); receiver = Task.Run(ReceiveLoopAsync);
         await joined.Task.WaitAsync(TimeSpan.FromSeconds(15), stop.Token);
-        await Audio.StartAsync(); commandLoop = Task.Run(CommandLoopAsync); stateLoop = Task.Run(StateLoopAsync); Status = "已连接 · 打开网页控制房间"; Changed?.Invoke();
+        await Audio.StartAsync(); Queue(new { type = "flags", microphone = Audio.Options.Microphone, music = false, source = "" }); commandLoop = Task.Run(CommandLoopAsync); stateLoop = Task.Run(StateLoopAsync); Status = "已连接 · 打开网页控制房间"; Changed?.Invoke();
     }
     private void Queue(object value) { controls.Writer.TryWrite(JsonSerializer.SerializeToUtf8Bytes(value, RoomCipher.JsonOptions)); wake.Writer.TryWrite(0); }
     private void PublishAudio(byte kind, byte[] opus)
@@ -106,8 +105,10 @@ public sealed class RoomClient : IAsyncDisposable
                     case "members":
                         var next = root.GetProperty("members").Clone(); var ids = next.EnumerateArray().Select(m => m.GetProperty("id").GetString()).ToHashSet();
                         foreach (var old in members.EnumerateArray()) if (!ids.Contains(old.GetProperty("id").GetString())) Audio.Mix.Remove(old.GetProperty("id").GetString()!);
-                        members = next; Changed?.Invoke(); break;
-                    case "controllerAttached": Audio.PrivacyMute(); connectionId = root.GetProperty("connectionId").GetString(); controlSequence = -1; stateSequence = 0; appliedRevision = 0; commands.Writer.TryWrite((connectionId, JsonSerializer.SerializeToElement(new { action = "controllerDetached" }))); break;
+                        if (!seenRoster) Audio.Mix.Notify(true);
+                        else { var oldIds = members.EnumerateArray().Select(m => m.GetProperty("id").GetString()).ToHashSet(); if (ids.Except(oldIds).Any()) Audio.Mix.Notify(true); if (oldIds.Except(ids).Any()) Audio.Mix.Notify(false); }
+                        seenRoster = true; members = next; Changed?.Invoke(); break;
+                    case "controllerAttached": if (hadController) Audio.PrivacyMute(); connectionId = root.GetProperty("connectionId").GetString(); controlSequence = -1; stateSequence = 0; appliedRevision = 0; if (hadController) commands.Writer.TryWrite((connectionId, JsonSerializer.SerializeToElement(new { action = "controllerDetached" }))); hadController = true; break;
                     case "controllerDetached": Audio.PrivacyMute(); connectionId = null; commands.Writer.TryWrite((connectionId, JsonSerializer.SerializeToElement(new { action = "controllerDetached" }))); break;
                     case "control":
                         if (connectionId is null || root.GetProperty("connectionId").GetString() != connectionId) break;

@@ -4,10 +4,14 @@ export class BrowserAudio{
     if(!window.AudioDecoder||!window.AudioEncoder)throw new Error('当前浏览器缺少实时音频编码，请使用新版 Edge / Chrome 或 Windows 客户端');
     for(const channels of [1,2])if(!(await AudioDecoder.isConfigSupported({codec:'opus',sampleRate:48000,numberOfChannels:channels})).supported)throw new Error('浏览器不支持 Opus 解码，请使用 Windows 客户端');
     this.context=new AudioContext({sampleRate:48000,latencyHint:'interactive'});await this.context.resume();await this.context.audioWorklet.addModule('/room-worklet.js');
-    this.mixer=new AudioWorkletNode(this.context,'voicebridge-room-mixer',{numberOfInputs:0,numberOfOutputs:1,outputChannelCount:[2]});this.mixer.connect(this.context.destination);this.mixer.port.onmessage=({data})=>this.onStats(data);this.configure(this.options);
+    this.mixer=new AudioWorkletNode(this.context,'voicebridge-room-mixer',{numberOfInputs:0,numberOfOutputs:1,outputChannelCount:[2]});this.mixer.connect(this.context.destination);this.noticeGain=this.context.createGain();this.noticeGain.connect(this.context.destination);this.mixer.port.onmessage=({data})=>this.onStats(data);this.configure(this.options);
   }
-  configure(options){this.options={...this.options,...options};this.mixer?.port.postMessage({type:'master',value:this.options.speakerGain/100});this.mixer?.port.postMessage({type:'auto',value:this.options.autoBuffer});
+  configure(options){this.options={...this.options,...options};if(this.noticeGain)this.noticeGain.gain.value=this.options.speakerGain/100;this.mixer?.port.postMessage({type:'master',value:this.options.speakerGain/100});this.mixer?.port.postMessage({type:'auto',value:this.options.autoBuffer});
     for(const [id,value] of Object.entries(this.options.memberVoice||{}))this.setGain(id,0,value);for(const [id,value] of Object.entries(this.options.memberMusic||{}))this.setGain(id,1,value);this.updateGate();this.capture[1]?.node.port.postMessage({enabled:true,gain:(this.options.musicGain??100)/100,epoch:this.shareEpoch});}
+  notify(joined){
+    if(!this.context||!this.noticeGain)return;const start=this.context.currentTime;
+    for(const [n,frequency] of [660,joined?880:440].entries()){const oscillator=this.context.createOscillator(),gain=this.context.createGain(),at=start+n*.09;oscillator.frequency.value=frequency;gain.gain.setValueAtTime(0,at);gain.gain.linearRampToValueAtTime(.055,at+.01);gain.gain.linearRampToValueAtTime(0,at+.09);oscillator.connect(gain).connect(this.noticeGain);oscillator.start(at);oscillator.stop(at+.09);oscillator.onended=()=>{oscillator.disconnect();gain.disconnect();};}
+  }
   setGain(id,kind,percent){const key=id+':'+kind,value=percent/100;this.gains.set(key,value);this.mixer?.port.postMessage({type:'gain',key,value});}
   receive(frame){
     const key=frame.id+':'+frame.kind;let item=this.decoders.get(key);if(!item){
@@ -52,5 +56,5 @@ export class BrowserAudio{
   keyUp(){if(this.pressed){this.pressed=false;this.micEpoch++;this.updateGate();}}
   updateGate(){const capture=this.capture[0];if(capture)capture.node.port.postMessage({enabled:this.gate(),gain:this.options.microphoneGain/100,epoch:this.micEpoch});}
   stopCapture(kind){if(kind===0){this.micEpoch++;this.options.microphone=false;this.pressed=false;}else this.shareEpoch++;const capture=this.capture[kind];this.capture[kind]=null;if(!capture)return;capture.source.disconnect();capture.node.disconnect();if(capture.encoder.state!=='closed')capture.encoder.close();for(const track of capture.stream.getTracks()){track.onended=null;track.stop();}}
-  async stop(){this.stopCapture(0);this.stopCapture(1);for(const item of this.decoders.values())if(item.decoder.state!=='closed')item.decoder.close();this.decoders.clear();this.mixer?.disconnect();this.mixer=null;const old=this.context;this.context=null;if(old)await old.close().catch(()=>{});}
+  async stop(){this.stopCapture(0);this.stopCapture(1);for(const item of this.decoders.values())if(item.decoder.state!=='closed')item.decoder.close();this.decoders.clear();this.mixer?.disconnect();this.mixer=null;const old=this.context;if(old?.state==='running')this.notify(false);this.context=null;if(old){if(old.state==='running')await new Promise(resolve=>setTimeout(resolve,200));await old.close().catch(()=>{});}}
 }

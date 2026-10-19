@@ -55,8 +55,8 @@ public sealed class DesktopAudio : IAsyncDisposable
         var initial = await Task.Run(AudioSources.Read); Volatile.Write(ref inventory, initial);
         monitor = Task.Run(MonitorAsync);
         pump = new Thread(Pump) { IsBackground = true, Name = "Room Opus transmit" }; pump.Start();
-        // Listening starts with the room, but microphone and application capture remain off.
-        await ApplyAsync(new());
+        // Listening starts with the room, but microphone opens on entry as requested; application capture remains off.
+        await ApplyAsync(new() { Microphone = true });
     }
     public Task ApplyAsync(AudioOptions next) { long approval = Interlocked.Read(ref privacyEpoch); return Task.Run(() => ApplyCoreAsync(next, approval)); }
     private async Task ApplyCoreAsync(AudioOptions next, long approval)
@@ -66,6 +66,7 @@ public sealed class DesktopAudio : IAsyncDisposable
         await lifecycle.WaitAsync();
         try
         {
+            if (disposed) return;
             Mix.SpeakerGain = next.SpeakerGain / 100; Mix.AutoBuffer = next.AutoBuffer;
             foreach (var entry in next.MemberVoice.Take(8)) Mix.SetGain(entry.Key, 0, entry.Value);
             foreach (var entry in next.MemberMusic.Take(8)) Mix.SetGain(entry.Key, 1, entry.Value);
@@ -194,8 +195,8 @@ public sealed class DesktopAudio : IAsyncDisposable
     public ValueTask DisposeAsync() { lock (disposeGate) return new(disposal ??= Task.Run(DisposeCoreAsync)); }
     private async Task DisposeCoreAsync()
     {
-        if (disposed) return; disposed = true; stop.Cancel(); if (monitor is not null) await monitor; pump?.Join(TimeSpan.FromSeconds(3));
-        await lifecycle.WaitAsync(); try { StopMicrophone(); await StopSourcesAsync(); output?.Stop(); output?.Dispose(); outputDevice?.Dispose(); enumerator?.Dispose(); Mix.Dispose(); } finally { lifecycle.Release(); stop.Dispose(); }
+        if (disposed) return; disposed = true; PrivacyMute(); stop.Cancel(); if (monitor is not null) await monitor; pump?.Join(TimeSpan.FromSeconds(3));
+        await lifecycle.WaitAsync(); try { StopMicrophone(); await StopSourcesAsync(); if (output is not null) { Mix.BeginClosing(); Mix.Notify(false); await Task.Delay(200); } output?.Stop(); output?.Dispose(); outputDevice?.Dispose(); enumerator?.Dispose(); Mix.Dispose(); } finally { lifecycle.Release(); stop.Dispose(); }
     }
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
 }

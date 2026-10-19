@@ -1,6 +1,6 @@
 # VoiceBridge room protocol 3
 
-HTTPS POST `/api/rooms` requires the master sender key as Bearer; the server compares its SHA256 to the configured hash. Returns random room id, owner writeToken and listenToken. Owner DELETE `/api/rooms/:id` revokes the room. Room crypto root key is generated on the host and never posted to the server.
+HTTPS POST `/api/rooms` allows anonymous creation when PUBLIC_ROOM_CREATION=1, subject to rate/capacity limits. Otherwise it requires a private sender key as Bearer and compares its SHA256 to the configured hash. Returns random room id, owner writeToken and listenToken. Owner DELETE `/api/rooms/:id` revokes the room. Room crypto root key is generated on the host and never posted to the server.
 
 Invitation: `/room/<32 hex>#<64 hex listenToken>.<64 hex rootKey>`.
 
@@ -15,3 +15,5 @@ HKDF-SHA256 root key, salt UTF8 room id, info `VoiceBridge audio v2|<kind>|<memb
 State/control envelope has type, connectionId, sequence, iv (base64 nonce), data (base64 ciphertext+tag). HKDF info `VoiceBridge state v2|<memberId>|<connectionId>` or `VoiceBridge control v2|<memberId>|<connectionId>`; AAD `<room>|<direction>|<memberId>|<connectionId>|<sequence>`. Controller epochs prevent cross-connection replay. Device names and source inventory go only between the desktop and its private controller. Public member flags expose nickname, microphone/music state and selected source display name only.
 
 Full configure commands carry a monotonically increasing revision. Desktop echoes appliedRevision so a periodic state update cannot revert a slider still awaiting acknowledgement. Invalid packets and stale audio are dropped; slow connections are closed rather than accumulating unlimited latency.
+
+Version 0.9.1: JSON `{type:"rename",name}` changes only the authenticated browser peer or the controller's own desktop member; it cannot target other member ids. Identity-stable member updates do not trigger join/leave cues. New room entry opens the microphone; first desktop controller preserves that state, while replacing/closing the controller still mutes for privacy.
