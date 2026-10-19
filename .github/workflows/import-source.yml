@@ -16,8 +16,8 @@ jobs:
         run: |
           import hashlib, pathlib, shutil, stat, subprocess, sys, tempfile, zipfile
           root = pathlib.Path.cwd().resolve()
-          archive = root / 'VoiceBridge-v0.9.0-source.zip'
-          expected = '29e5b29fd2fa832c5b5b98af8a2b423749d25b718b50550cf60dff150100949a'
+          archive = root / 'VoiceBridge-v0.9.1-source.zip'
+          expected = '8fe3c05aafb632fa6c1119d0bf427fa70e01ee22544913e31b0a8d869eb957c0'
           if hashlib.sha256(archive.read_bytes()).hexdigest() != expected:
               raise RuntimeError('Source archive checksum mismatch.')
           marker = root / '.source-import-sha256'
@@ -35,7 +35,7 @@ jobs:
                   package.extractall(unpacked)
               source = unpacked / 'VoiceBridge'
               files = [file for file in source.rglob('*') if file.is_file()]
-              if len(files) != 56 or not (source / 'VoiceBridge.sln').is_file():
+              if len(files) != 58 or not (source / 'VoiceBridge.sln').is_file():
                   raise RuntimeError('Complete reviewed project missing.')
               for file in files:
                   relative = file.relative_to(source)
@@ -60,6 +60,6 @@ jobs:
           subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], check=True)
           subprocess.run(['git', 'add', '--all'], check=True)
           if subprocess.run(['git', 'diff', '--cached', '--quiet']).returncode:
-              subprocess.run(['git', 'commit', '-m', 'Replace legacy audio routes with room-only multi-source Opus sharing'], check=True)
+              subprocess.run(['git', 'commit', '-m', 'Add public room defaults, editable nicknames and entry microphone with member cues'], check=True)
               subprocess.run(['git', 'push', 'origin', 'HEAD:main'], check=True)
           print(f'Imported {len(files)} verified room-only source files.')
