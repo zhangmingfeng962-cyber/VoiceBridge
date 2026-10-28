@@ -1,0 +1,64 @@
+name: Publish VoiceBridge 0.10.0
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/publish-0.10.0.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.426'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.3'
+          cache: npm
+          cache-dependency-path: relay/package-lock.json
+      - name: Restore, test and build Windows client
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          dotnet restore VoiceBridge.sln --locked-mode
+          dotnet test VoiceBridge.sln -c Release --no-restore --nologo
+          Push-Location relay
+          npm ci --ignore-scripts
+          npm test
+          Pop-Location
+          dotnet publish src/VoiceBridge.App/VoiceBridge.App.csproj -c Release -r win-x64 --self-contained true --no-restore -o artifacts/win-x64
+      - name: Package and publish verified assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          & scripts/Package-Preview.ps1 -ExecutablePath artifacts/win-x64/VoiceBridge.exe -OutputDirectory artifacts/release
+          $notes = @'
+          网站：[voicebridge-room.cn](https://voicebridge-room.cn/)
+
+          下载 VoiceBridge-v0.10.0.exe，输入昵称即可创建房间。已内置杭州公共服务，无需导入配置或自建服务器；朋友使用完整邀请即可加入。
+
+          - 音乐与人声独立传送，支持成员音量、按键说话、修改昵称和进出提示音。
+          - 窗口／桌面共享：单人共享、多人观看、暂停、切换来源、全屏和自动画质。
+          - HTTPS、免费证书续期和十分钟临时 TURN 凭据。中继按实际出口流量限速。
+          - 附件由此标签对应源码在 GitHub Windows runner 中构建，包含 EXE、77 文件完整源码包和 SHA256SUMS.txt。
+
+          验证：28 项 Node、14 项 .NET 测试通过；公网 HTTPS/WSS 建房、入房和音频包转发通过；UDP、TCP、TLS 三条远端中继路径各通过 10 项合成视频验证，两位观看者均实际解码画面。详见 docs/VERIFICATION-0.10.0.md。
+
+          这些测试不代表两台独立电脑的真实屏幕和音质验收；500ms 是待测目标。程序音源捕获需要 Windows 11 / build 20348+，较早 Windows 10 可共享浏览器标签页音频。每房间最多 8 人，公共实例容量有限，流量由站点维护者承担。
+          '@
+          [IO.File]::WriteAllText((Join-Path $PWD 'artifacts/release-notes.md'), $notes, [Text.UTF8Encoding]::new($false))
+          gh release create v0.10.0 --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --title "VoiceBridge 0.10.0 · 音乐与屏幕房间" --notes-file artifacts/release-notes.md --latest artifacts/release/VoiceBridge-v0.10.0.exe artifacts/release/VoiceBridge-v0.10.0-source.zip artifacts/release/SHA256SUMS.txt
+          Get-Content artifacts/release/SHA256SUMS.txt | Add-Content $env:GITHUB_STEP_SUMMARY
