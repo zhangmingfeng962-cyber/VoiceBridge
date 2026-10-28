@@ -44,6 +44,7 @@ install -d -o root -g turnserver -m 0750 /etc/voicebridge-turn /etc/voicebridge-
 install -o root -g turnserver -m 0640 "$VB_TLS_CERT" /etc/voicebridge-turn/tls/fullchain.pem
 install -o root -g turnserver -m 0640 "$VB_TLS_KEY" /etc/voicebridge-turn/tls/privkey.pem
 install -o root -g turnserver -m 0640 /etc/voicebridge-turn/turnserver.conf.pending /etc/turnserver.conf
+bash "$script_dir/Configure-ScreenBandwidth.sh" --install
 python3 - <<'PY'
 from pathlib import Path
 env=Path('/etc/voicebridge/relay.env');keys={'STUN_URLS','TURN_URLS','TURN_SHARED_SECRET','SCREEN_VIDEO_BUDGET_BPS'}

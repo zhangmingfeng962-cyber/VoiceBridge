@@ -11,10 +11,12 @@ fingerprint
 use-auth-secret
 static-auth-secret=__SECRET__
 stale-nonce=600
-user-quota=8
+user-quota=32
 total-quota=64
 max-bps=300000
-bps-capacity=625000
+# Aggregate real egress is policed at 5 Mbps by Configure-ScreenBandwidth.sh.
+# A reservation of max-bps for each allocation would reject additional viewers.
+bps-capacity=0
 no-cli
 no-multicast-peers
 no-tcp-relay
