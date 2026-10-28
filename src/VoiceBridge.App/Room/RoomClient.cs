@@ -45,7 +45,7 @@ public sealed class RoomClient : IAsyncDisposable
         using var client = new HttpClient { BaseAddress = new Uri(origin), Timeout = TimeSpan.FromSeconds(15) };
         using var health = JsonDocument.Parse(await client.GetStringAsync("/health", stop.Token));
         if (!health.RootElement.TryGetProperty("protocol", out var version) || version.GetInt32() < 3) throw new InvalidOperationException("中继尚未升级到新版音乐房间。");
-        client.DefaultRequestHeaders.Add("X-VoiceBridge-Client", "0.9.1");
+        client.DefaultRequestHeaders.Add("X-VoiceBridge-Client", "0.10.0");
         using var created = await client.PostAsync("/api/rooms", new StringContent("{\"player\":\"room\"}", Encoding.UTF8, "application/json"), stop.Token); if ((int)created.StatusCode == 429) throw new InvalidOperationException("当前免费房间已满或建房过于频繁，请稍后重试。"); created.EnsureSuccessStatusCode();
         using var json = JsonDocument.Parse(await created.Content.ReadAsStringAsync(stop.Token)); var root = json.RootElement;
         Invite = new(origin, root.GetProperty("id").GetString()!, root.GetProperty("listenToken").GetString()!, RandomNumberGenerator.GetBytes(32)); writer = root.GetProperty("writeToken").GetString();

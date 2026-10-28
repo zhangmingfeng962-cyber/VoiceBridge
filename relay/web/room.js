@@ -1,6 +1,7 @@
 import {RoomCrypto} from './crypto.js';
 import {BrowserAudio} from './audio.js';
 import {membershipCues} from './room-events.js';
+import {ScreenView} from './screen-view.js';
 const el=id=>document.getElementById(id),room=location.pathname.match(/^\/room\/([a-f0-9]{32})$/)?.[1],parts=location.hash.slice(1).split('.');
 const token=parts[0],key=parts[1],paired=parts[2]==='desktop',nativeId=parts[3],controlToken=parts[4];
 const cipher=room&&/^[a-f0-9]{64}$/.test(key||'')?new RoomCrypto(room,key):null;
@@ -12,6 +13,16 @@ const text=message=>{el('status').textContent=message;};
 const keyName=code=>code>=65&&code<=90?String.fromCharCode(code):code>=48&&code<=57?String.fromCharCode(code):code>=112&&code<=135?'F'+(code-111):({32:'空格',16:'Shift',17:'Ctrl',18:'Alt',9:'Tab'})[code]||'键 '+code;
 const simpleInvite=()=>location.origin+'/room/'+room+'#'+token+'.'+key;
 const controlIds=['microphone','talkMode','bindKey','micDevice','outputDevice','micGain','micDown','micUp','speakerGain','speakerDown','speakerUp','sourceSelect','share','shareTab','musicGain','autoBuffer'];
+let lastUnderruns=0,audioPressureUntil=0;
+const screenView=new ScreenView({
+  send:message=>{if(joined&&socket?.readyState===WebSocket.OPEN&&socket.bufferedAmount<32768)socket.send(JSON.stringify(message));},
+  sound:()=>({sharing:options.sharing,sourceId:options.sourceId,volume:options.musicGain,program:paired,ready:!paired||nativeReady,listening:options.memberMusic}),
+  setSound:async value=>{if(!joined)return;if(paired){if(value&&!options.sourceId)throw Error('请先选择一个本机程序音源');options.sharing=value;changed();}else{if(value){await audio.shareTab();options.sharing=!!audio.capture[1];}else{audio.stopCapture(1);options.sharing=false;}changed();}},
+  setVolume:value=>{options.musicGain=value;changed();},
+  setSource:value=>{options.sourceId=value;changed();},
+  setListening:(id,value)=>{options.memberMusic[id]=value;changed();},
+  audioPressure:()=>performance.now()<audioPressureUntil||pendingFrames>4||(socket?.bufferedAmount||0)>16384
+});
 function enabled(value){for(const id of controlIds)el(id).disabled=!value;el('saveNickname').disabled=!value;el('join').disabled=value;el('leave').disabled=!value;}
 function refreshControls(){
   el('microphone').textContent=options.microphone?'关闭麦克风':'开启麦克风';el('microphone').setAttribute('aria-pressed',String(options.microphone));
@@ -21,6 +32,7 @@ function refreshControls(){
   el('pttHint').textContent=options.talkMode==='ptt'?(paired?'客户端运行时，游戏后台也可按住 '+keyName(options.talkKey)+' 说话。':'网页模式需保持页面焦点，按住 '+keyName(options.talkKey)+' 说话；切走页面会停止发送。'):'自由发言：麦克风开启后持续传送人声，讲话不会压低音乐。';
   el('share').hidden=!paired;el('shareTab').hidden=paired;el('outputWrap').hidden=!paired;el('clientHelp').hidden=paired;
   if(!paired){el('sourceSelect').disabled=true;el('sourceHint').textContent='网页可选择其他浏览器标签页的音频；需要自动识别微信等桌面程序时，请使用 Windows 客户端加入本房间。';}
+  screenView.syncSound();
 }
 function choices(id,items,selected,empty){const select=el(id),signature=JSON.stringify(items);if(select.dataset.signature!==signature){select.replaceChildren();if(empty){const option=document.createElement('option');option.value='';option.textContent=empty;select.append(option);}for(const item of items){const option=document.createElement('option');option.value=item.id;option.textContent=item.name+(item.active?' · 正在发声':'');select.append(option);}select.dataset.signature=signature;}select.value=selected;if(select.selectedIndex<0)select.selectedIndex=0;}
 function applyGains(){audio?.configure(options);for(const member of roster){if(member.id===selfId)continue;const card=cards.get(member.id);if(!card)continue;for(const [kind,field] of [[0,'memberVoice'],[1,'memberMusic']]){const value=options[field]?.[member.id]??100,input=card.querySelector(`[data-kind="${kind}"]`),out=card.querySelector(`[data-value="${kind}"]`);if(document.activeElement!==input)input.value=value;out.textContent=Math.round(value)+'%';}}}
@@ -37,7 +49,7 @@ function members(){
   }
   el('onlineCount').textContent=roster.length+' / 8 人';applyGains();
 }
-function network(streams,decoded){const music=streams.filter(s=>s.id.endsWith(':1')),target=Math.max(0,...(music.length?music:streams).map(s=>s.targetMs));const under=streams.reduce((n,s)=>n+s.underruns,0);el('network').textContent=streams.length?(options.autoBuffer?'自动缓冲':'当前缓冲')+' · '+Math.round(target)+' ms'+(under?' · 曾等待补充缓冲 '+under+' 次':' · 连续接收中'):'等待其他成员发声或共享音乐';el('metrics').textContent='48 kHz · 立体声音乐 · Opus 20 ms 小帧'+(decoded!==undefined?' · 已解码 '+decoded+' 帧':' · 客户端独立播放');}
+function network(streams,decoded){const music=streams.filter(s=>s.id.endsWith(':1')),target=Math.max(0,...(music.length?music:streams).map(s=>s.targetMs));const under=streams.reduce((n,s)=>n+s.underruns,0);if(under>lastUnderruns)audioPressureUntil=performance.now()+8000;lastUnderruns=under;el('network').textContent=streams.length?(options.autoBuffer?'自动缓冲':'当前缓冲')+' · '+Math.round(target)+' ms'+(under?' · 曾等待补充缓冲 '+under+' 次':' · 连续接收中'):'等待其他成员发声或共享音乐';el('metrics').textContent='48 kHz · 立体声音乐 · Opus 20 ms 小帧'+(decoded!==undefined?' · 已解码 '+decoded+' 帧':' · 客户端独立播放');}
 function changed(){refreshControls();applyGains();if(!joined)return;if(paired){pendingRevision=++revision;clearTimeout(updateTimer);updateTimer=setTimeout(()=>{const message={action:'configure',revision:pendingRevision,options:structuredClone(options)},current=epoch;controlSending=controlSending.then(async()=>{const sealed=await cipher.sealControl(selfId,connectionId,controlSequence++,message);if(current===epoch&&socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify(sealed));}).catch(()=>text('控制发送失败，请重新打开客户端的控制页'));},70);}else{audio?.configure(options);sendFlags();}}
 function sendFlags(){if(socket?.readyState===WebSocket.OPEN&&!paired)socket.send(JSON.stringify({type:'flags',microphone:options.microphone,music:options.sharing,source:options.sharing?'浏览器标签页':''}));}
 function sendAudio(kind,opus,captureEpoch){
@@ -47,6 +59,7 @@ function sendAudio(kind,opus,captureEpoch){
 async function handleState(message,current){if(message.sequence<=stateSequence)return;const state=await cipher.openState(selfId,connectionId,message);if(!state||current!==epoch)return;stateSequence=message.sequence;if(!nativeReady){nativeReady=true;for(const id of controlIds)el(id).disabled=false;}
   if((state.appliedRevision??0)>=pendingRevision){options={...defaults(),...state.options,memberVoice:state.options.memberVoice||{},memberMusic:state.options.memberMusic||{}};refreshControls();applyGains();}
   choices('micDevice',state.microphones,options.microphoneId,'系统默认麦克风');choices('outputDevice',state.outputs,options.outputId,'默认听音设备');choices('sourceSelect',state.sources,options.sourceId,'选择一个发声程序');el('micLevel').style.width=Math.min(100,state.microphonePeak*100)+'%';el('overload').hidden=state.speakerPeak<=1&&state.microphonePeak<=1;el('sourceStatus').textContent=state.status;network(state.streams||[]);el('sourceHint').textContent='本机检测到 '+state.sources.length+' 个音源，列表每两秒更新。只共享你选择的程序。';
+  screenView.syncSound();
 }
 async function join(){
   if(joined)return;if(!room||!cipher||!/^[a-f0-9]{64}$/.test(token||'')){text('请打开完整的房间邀请');return;}
@@ -60,7 +73,8 @@ async function join(){
       if(current!==epoch)return;
       if(event.data instanceof ArrayBuffer){if(paired||pending>=24)return;pending++;receiving=receiving.then(async()=>{const frame=await cipher.openAudio(event.data);if(current!==epoch||frame.id===selfId||!roster.some(m=>m.id===frame.id))return;const identity=frame.id+':'+frame.kind;if(frame.sequence<=(lastReceived.get(identity)??-1))return;lastReceived.set(identity,frame.sequence);audio?.receive(frame);}).catch(()=>text('有一路音频未能解密，请确认完整邀请来自同一房间')).finally(()=>pending--);return;}
       let message;try{message=JSON.parse(event.data);}catch{return;}
-      if(message.type==='welcome'){clearTimeout(timeout);joined=true;selfId=message.id;connectionId=message.connectionId;stateSequence=-1;controlSequence=0;revision=pendingRevision=0;enabled(true);refreshControls();text(paired?'客户端已连接 · 本页只控制，不重复播放房间声音':'已进入房间 · 正在开启麦克风');el('nickname').disabled=false;if(paired){nativeReady=false;for(const id of controlIds)el(id).disabled=true;el('microphone').textContent='正在读取麦克风…';channel?.postMessage({type:'nativePlayback'});el('roomHint').textContent='本机专属控制页。邀请朋友请使用下方邀请按钮。';}else {channel?.postMessage({type:'browserJoined'});void setBrowserMicrophone(true);void refreshMicrophones();}}
+      if(message.type==='welcome'){clearTimeout(timeout);joined=true;selfId=message.id;connectionId=message.connectionId;stateSequence=-1;controlSequence=0;revision=pendingRevision=0;enabled(true);refreshControls();screenView.join(selfId);text(paired?'客户端已连接 · 本页只控制，不重复播放房间声音':'已进入房间 · 正在开启麦克风');el('nickname').disabled=false;if(paired){nativeReady=false;for(const id of controlIds)el(id).disabled=true;el('microphone').textContent='正在读取麦克风…';channel?.postMessage({type:'nativePlayback'});el('roomHint').textContent='本机专属控制页。邀请朋友请使用下方邀请按钮。';}else {channel?.postMessage({type:'browserJoined'});void setBrowserMicrophone(true);void refreshMicrophones();}}
+      if(typeof message.type==='string'&&message.type.startsWith('screen:'))void screenView.receive(message);
       if(message.type==='members'){if(!paired)for(const cue of membershipCues(roster,message.members,seenMembers))audio?.notify(cue);seenMembers=true;roster=message.members;members();}
       if(message.type==='state'&&paired)receiving=receiving.then(()=>handleState(message,current)).catch(()=>text('本机控制状态解密失败，请从客户端重新打开控制页'));
     };
@@ -69,7 +83,7 @@ async function join(){
 }
 async function leave(message='已退出房间',explicit=false){
   if(explicit&&paired&&joined&&socket?.readyState===WebSocket.OPEN){try{socket.send(JSON.stringify(await cipher.sealControl(selfId,connectionId,controlSequence++,{action:'leave'})));}catch{}}
-  epoch++;micRequest++;nativeReady=false;joined=false;seenMembers=false;clearTimeout(updateTimer);const old=socket;socket=null;if(old){old.onclose=null;old.close();}const oldAudio=audio;audio=null;if(oldAudio)await oldAudio.stop();options={...options,microphone:false,sharing:false};roster=[];members();selfId=null;lastReceived.clear();enabled(false);el('nickname').disabled=false;refreshControls();text(message);
+  screenView.leave();epoch++;micRequest++;nativeReady=false;joined=false;seenMembers=false;lastUnderruns=0;audioPressureUntil=0;clearTimeout(updateTimer);const old=socket;socket=null;if(old){old.onclose=null;old.close();}const oldAudio=audio;audio=null;if(oldAudio)await oldAudio.stop();options={...options,microphone:false,sharing:false};roster=[];members();selfId=null;lastReceived.clear();enabled(false);el('nickname').disabled=false;refreshControls();text(message);
 }
 async function refreshMicrophones(){if(paired||!audio)return;try{const devices=await audio.inputs();choices('micDevice',devices.map(d=>({id:d.deviceId,name:d.label||'麦克风（开启权限后显示名称）'})),options.microphoneId,'系统默认麦克风');}catch{}}
 el('join').addEventListener('click',()=>void join());el('leave').addEventListener('click',()=>void leave('已退出房间',true));el('invite').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(simpleInvite());text('入房邀请已复制，不包含你的本机控制权限');}catch{text('请使用 Windows 客户端的“邀请朋友”按钮复制');}});

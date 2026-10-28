@@ -1,6 +1,6 @@
-<Window x:Class="VoiceBridge.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="VoiceBridge 0.9.1 · 音乐房间" Icon="Assets/voicebridge.ico" Width="720" Height="700" MinWidth="620" MinHeight="580" Background="#101927" WindowStartupLocation="CenterScreen">
+<Window x:Class="VoiceBridge.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="VoiceBridge 0.10.0 · 音乐与屏幕房间" Icon="Assets/voicebridge.ico" Width="720" Height="700" MinWidth="620" MinHeight="580" Background="#101927" WindowStartupLocation="CenterScreen">
  <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="30">
-  <StackPanel Orientation="Horizontal"><Image Source="Assets/voicebridge.png" Width="50" Height="50" Margin="0,0,14,0"/><StackPanel><TextBlock Text="VoiceBridge 音乐房间" FontSize="27" FontWeight="SemiBold"/><TextBlock Text="每个人都能分享音乐，也能自在聊天。" Foreground="#9EAFCA" Margin="0,5,0,0"/></StackPanel></StackPanel>
+  <StackPanel Orientation="Horizontal"><Image Source="Assets/voicebridge.png" Width="50" Height="50" Margin="0,0,14,0"/><StackPanel><TextBlock Text="VoiceBridge 音乐与屏幕房间" FontSize="25" FontWeight="SemiBold"/><TextBlock Text="一起听，一起聊，一起看。" Foreground="#9EAFCA" Margin="0,5,0,0"/></StackPanel></StackPanel>
   <TextBlock Text="你的房间昵称" Margin="0,25,0,7"/><TextBox x:Name="NicknameBox" Text="朋友" MaxLength="20" AutomationProperties.Name="房间昵称"/>
   <WrapPanel Margin="0,16,0,20"><Button x:Name="CreateButton" Content="创建房间" Click="Create_Click"/></WrapPanel>
   <TextBlock Text="或粘贴朋友发来的完整邀请" Margin="0,0,0,7"/><TextBox x:Name="InviteBox" AutomationProperties.Name="房间邀请" TextWrapping="Wrap" MaxHeight="75" VerticalScrollBarVisibility="Auto"/>
@@ -9,6 +9,6 @@
    <TextBlock x:Name="StatusText" Text="国内房间服务已内置，无需导入配置。入房自动开启麦克风；音乐需手动共享。" TextWrapping="Wrap"/>
    <WrapPanel Margin="0,14,0,0"><Button x:Name="OpenButton" Content="打开我的房间控制页" Click="Open_Click"/><Button x:Name="CopyButton" Content="邀请朋友" Click="Copy_Click" Background="#2A3B52"/><Button x:Name="LeaveButton" Content="退出房间" Click="Leave_Click" Background="#653D48"/></WrapPanel>
   </StackPanel></Border>
-  <TextBlock Text="麦克风、总收听音量、每位成员音量、发言方式和程序音源都在网页房间里调节。客户端负责识别程序和独立播放房间声音，请在使用期间保持运行。" TextWrapping="Wrap" Foreground="#9EAFCA" FontSize="12" Margin="0,15,0,0"/>
+  <TextBlock Text="麦克风、音量、程序音源和屏幕共享在网页房间里控制。屏幕共享需新版房间服务；每次从系统选择器确认软件窗口或显示器。客户端负责识别程序并独立播放房间声音，请保持运行。" TextWrapping="Wrap" Foreground="#9EAFCA" FontSize="12" Margin="0,15,0,0"/>
  </StackPanel></ScrollViewer>
 </Window>

@@ -1,7 +1,7 @@
 import fs from 'node:fs';import path from 'node:path';import zlib from 'node:zlib';import crypto from 'node:crypto';import {fileURLToPath} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),destination=path.resolve(process.argv[2]||'artifacts/offline-relay'),files={};
 function add(source,name){if(fs.statSync(source).isDirectory()){for(const child of fs.readdirSync(source))add(path.join(source,child),name+'/'+child);}else files[name]=fs.readFileSync(source).toString('base64');}
-add(path.join(root,'relay/server.mjs'),'server.mjs');add(path.join(root,'relay/package.json'),'package.json');add(path.join(root,'relay/web'),'web');add(fs.realpathSync(path.join(root,'relay/node_modules/ws')),'node_modules/ws');
+for(const name of fs.readdirSync(path.join(root,'relay')))if(name.endsWith('.mjs'))add(path.join(root,'relay',name),name);add(path.join(root,'relay/package.json'),'package.json');add(path.join(root,'relay/web'),'web');add(fs.realpathSync(path.join(root,'relay/node_modules/ws')),'node_modules/ws');
 const payload=zlib.gzipSync(Buffer.from(JSON.stringify(files)),{level:9}),hash=crypto.createHash('sha256').update(payload).digest('hex');
 fs.mkdirSync(destination,{recursive:true});fs.writeFileSync(path.join(destination,'source.b64'),payload.toString('base64'));
 const bootstrap=`const fs=require('node:fs'),path=require('node:path'),zlib=require('node:zlib'),crypto=require('node:crypto');
