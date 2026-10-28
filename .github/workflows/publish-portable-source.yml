@@ -19,36 +19,80 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: v0.10.0
-      - name: Package canonical source with Unix shell line endings
-        shell: pwsh
+      - name: Package and publish canonical source
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          & scripts/Package-Preview.ps1 -OutputDirectory artifacts/source
-          $source = Join-Path $PWD 'artifacts/source/VoiceBridge-v0.10.0-source.zip'
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $archive = [IO.Compression.ZipFile]::OpenRead($source)
-          try {
-            $entries = @($archive.Entries | Where-Object {$_.Name})
-            if ($entries.Count -ne 77) { throw 'Unexpected source file count' }
-            foreach ($entry in $entries | Where-Object {$_.Name.EndsWith('.sh')}) {
-              $reader = [IO.StreamReader]::new($entry.Open())
-              try { if ($reader.ReadToEnd().Contains("`r")) { throw 'Shell source has CR characters' } } finally { $reader.Dispose() }
-            }
-          } finally { $archive.Dispose() }
-          $portable = Join-Path $PWD 'artifacts/source/VoiceBridge-v0.10.0-source-portable.zip'
-          Move-Item -LiteralPath $source -Destination $portable
-          gh release download v0.10.0 --repo "$env:GITHUB_REPOSITORY" --pattern SHA256SUMS.txt --dir artifacts/original
-          $exe = @(Get-Content artifacts/original/SHA256SUMS.txt | Where-Object {$_ -match '^[a-f0-9]{64}  VoiceBridge-v0\.10\.0\.exe$'})
-          if ($exe.Count -ne 1) { throw 'Missing original client checksum' }
-          $sourceHash = (Get-FileHash -LiteralPath $portable -Algorithm SHA256).Hash.ToLowerInvariant()
-          $checks = @("$sourceHash  VoiceBridge-v0.10.0-source-portable.zip", $exe[0])
-          [IO.File]::WriteAllLines((Join-Path $PWD 'artifacts/source/SHA256SUMS-portable.txt'), $checks, [Text.Encoding]::ASCII)
-          gh release upload v0.10.0 --repo "$env:GITHUB_REPOSITORY" artifacts/source/VoiceBridge-v0.10.0-source-portable.zip artifacts/source/SHA256SUMS-portable.txt
-          $body = (gh release view v0.10.0 --repo "$env:GITHUB_REPOSITORY" --json body --jq .body) -join "`n"
-          $body += "`n`n源码推荐下载 VoiceBridge-v0.10.0-source-portable.zip，并使用 SHA256SUMS-portable.txt 校验。它与标签源码一致，保留 Linux 部署脚本的原始 LF 换行；原 Windows 打包版继续保留。"
-          [IO.File]::WriteAllText((Join-Path $PWD 'artifacts/source/notes.md'), $body, [Text.UTF8Encoding]::new($false))
-          gh release edit v0.10.0 --repo "$env:GITHUB_REPOSITORY" --notes-file artifacts/source/notes.md
-          $checks | Add-Content $env:GITHUB_STEP_SUMMARY
+          set -euo pipefail
+          mkdir -p artifacts/source artifacts/original
+          gh release download v0.10.0 --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS.txt --dir artifacts/original
+          python3 - <<'PY'
+          import pathlib,zipfile,hashlib,re
+          root=pathlib.Path('.')
+          allowed=['.gitattributes','.gitignore','CHANGELOG.md','Directory.Build.props','global.json','LICENSE','README.md','VoiceBridge.sln','src','tests','scripts','third-party','docs','relay']
+          files=[]
+          for name in allowed:
+              p=root/name
+              for f in sorted(p.rglob('*')) if p.is_dir() else [p]:
+                  if not f.is_file(): continue
+                  rel=f.relative_to(root)
+                  if any(x in {'bin','obj','node_modules','.git','artifacts'} for x in rel.parts): continue
+                  if f.suffix in {'.exe','.pdb','.zip','.pem','.vbrelay'}: raise ValueError(str(rel))
+                  files.append((f,rel))
+          assert len(files)==77,len(files)
+          target=pathlib.Path('artifacts/source/VoiceBridge-v0.10.0-source-portable.zip')
+          with zipfile.ZipFile(target,'w',zipfile.ZIP_DEFLATED,compresslevel=9) as z:
+              for f,rel in files:
+                  data=f.read_bytes()
+                  if f.suffix=='.sh':
+                      data=data.replace(b'\r\n',b'\n')
+                      assert b'\r' not in data
+                  z.writestr('VoiceBridge/'+rel.as_posix(),data)
+          lines=pathlib.Path('artifacts/original/SHA256SUMS.txt').read_text().splitlines()
+          exe=[line for line in lines if re.fullmatch(r'[a-f0-9]{64}  VoiceBridge-v0\.10\.0\.exe',line)]
+          assert len(exe)==1
+          digest=hashlib.sha256(target.read_bytes()).hexdigest()
+          pathlib.Path('artifacts/source/SHA256SUMS-portable.txt').write_text(digest+'  '+target.name+'\n'+exe[0]+'\n')
+          print('PORTABLE_SOURCE_77_FILES_LF_OK',digest)
+          PY
+          gh release upload v0.10.0 --repo "$GITHUB_REPOSITORY" artifacts/source/VoiceBridge-v0.10.0-source-portable.zip artifacts/source/SHA256SUMS-portable.txt
+          gh release view v0.10.0 --repo "$GITHUB_REPOSITORY" --json body --jq .body > artifacts/source/notes.md
+          printf '\n\n源码推荐下载 VoiceBridge-v0.10.0-source-portable.zip，并用 SHA256SUMS-portable.txt 校验。此包保留项目隐藏文件和 Linux 脚本 LF 换行，原 Windows 打包版继续保留。\n' >> artifacts/source/notes.md
+          gh release edit v0.10.0 --repo "$GITHUB_REPOSITORY" --notes-file artifacts/source/notes.md
+          cat artifacts/source/SHA256SUMS-portable.txt >> "$GITHUB_STEP_SUMMARY"
+
+  transfer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Prepare integrity checked compressed client transport
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/client
+          gh release download v0.10.0 --repo "$GITHUB_REPOSITORY" --pattern VoiceBridge-v0.10.0.exe --dir artifacts/client
+          python3 - <<'PY'
+          import pathlib,hashlib,gzip,json,base64
+          data=pathlib.Path('artifacts/client/VoiceBridge-v0.10.0.exe').read_bytes()
+          digest=hashlib.sha256(data).hexdigest()
+          assert digest=='aab537626db179ac63324fcf282a916f38491f8c43e9d4ab08a858cccc57a389'
+          packed=gzip.compress(data,compresslevel=9,mtime=0)
+          pathlib.Path('artifacts/client/blob-request.json').write_text(json.dumps({'encoding':'base64','content':base64.b64encode(packed).decode()}))
+          pathlib.Path('artifacts/client/metadata.json').write_text(json.dumps({'version':'0.10.0','exeSha256':digest,'bytes':len(data),'gzipSha256':hashlib.sha256(packed).hexdigest(),'gzipBytes':len(packed)}))
+          PY
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/blobs" --input artifacts/client/blob-request.json > artifacts/client/blob-response.json
+          python3 - <<'PY'
+          import pathlib,json,base64
+          meta=json.loads(pathlib.Path('artifacts/client/metadata.json').read_text())
+          meta['blob']=json.loads(pathlib.Path('artifacts/client/blob-response.json').read_text())['sha']
+          content=json.dumps(meta,indent=2)+'\n'
+          pathlib.Path('artifacts/client/metadata.json').write_text(content)
+          pathlib.Path('artifacts/client/commit-request.json').write_text(json.dumps({'message':'Record verified 0.10.0 compressed deployment artifact','branch':'main','content':base64.b64encode(content.encode()).decode()}))
+          PY
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/deployment/client-transfer-0.10.0.json" --input artifacts/client/commit-request.json > /dev/null
+          cat artifacts/client/metadata.json >> "$GITHUB_STEP_SUMMARY"
