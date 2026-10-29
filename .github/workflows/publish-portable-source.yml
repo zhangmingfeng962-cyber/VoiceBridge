@@ -26,6 +26,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts/source artifacts/original
+          if gh release view v0.10.0 --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx 'VoiceBridge-v0.10.0-source-portable.zip'; then
+            echo 'Portable source already verified and published'
+            exit 0
+          fi
           gh release download v0.10.0 --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS.txt --dir artifacts/original
           python3 - <<'PY'
           import pathlib,zipfile,hashlib,re
@@ -68,7 +72,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Prepare integrity checked compressed client transport
+      - name: Transfer verified client in bounded compressed chunks
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -77,22 +81,30 @@ jobs:
           mkdir -p artifacts/client
           gh release download v0.10.0 --repo "$GITHUB_REPOSITORY" --pattern VoiceBridge-v0.10.0.exe --dir artifacts/client
           python3 - <<'PY'
-          import pathlib,hashlib,gzip,json,base64
+          import os,pathlib,hashlib,gzip,json,base64,urllib.request,urllib.error
+          repo=os.environ['GITHUB_REPOSITORY']
+          token=os.environ['GH_TOKEN']
+          def api(path,payload=None):
+              request=urllib.request.Request('https://api.github.com/repos/'+repo+'/'+path,data=json.dumps(payload).encode() if payload is not None else None,headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','Content-Type':'application/json','X-GitHub-Api-Version':'2022-11-28'},method='POST' if payload is not None else 'GET')
+              with urllib.request.urlopen(request,timeout=120) as result:return json.load(result)
           data=pathlib.Path('artifacts/client/VoiceBridge-v0.10.0.exe').read_bytes()
           digest=hashlib.sha256(data).hexdigest()
           assert digest=='aab537626db179ac63324fcf282a916f38491f8c43e9d4ab08a858cccc57a389'
           packed=gzip.compress(data,compresslevel=9,mtime=0)
-          pathlib.Path('artifacts/client/blob-request.json').write_text(json.dumps({'encoding':'base64','content':base64.b64encode(packed).decode()}))
-          pathlib.Path('artifacts/client/metadata.json').write_text(json.dumps({'version':'0.10.0','exeSha256':digest,'bytes':len(data),'gzipSha256':hashlib.sha256(packed).hexdigest(),'gzipBytes':len(packed)}))
-          PY
-          gh api --method POST "repos/$GITHUB_REPOSITORY/git/blobs" --input artifacts/client/blob-request.json > artifacts/client/blob-response.json
-          python3 - <<'PY'
-          import pathlib,json,base64
-          meta=json.loads(pathlib.Path('artifacts/client/metadata.json').read_text())
-          meta['blob']=json.loads(pathlib.Path('artifacts/client/blob-response.json').read_text())['sha']
+          meta={'encoding':'chunks-gzip-v1','version':'0.10.0','exeSha256':digest,'bytes':len(data),'gzipSha256':hashlib.sha256(packed).hexdigest(),'gzipBytes':len(packed),'chunks':[]}
+          for index,offset in enumerate(range(0,len(packed),2*1024*1024)):
+              chunk=packed[offset:offset+2*1024*1024]
+              created=api('git/blobs',{'encoding':'base64','content':base64.b64encode(chunk).decode()})
+              meta['chunks'].append({'blob':created['sha'],'bytes':len(chunk),'sha256':hashlib.sha256(chunk).hexdigest()})
+              print('CHUNK_READY',index,len(chunk),flush=True)
           content=json.dumps(meta,indent=2)+'\n'
-          pathlib.Path('artifacts/client/metadata.json').write_text(content)
-          pathlib.Path('artifacts/client/commit-request.json').write_text(json.dumps({'message':'Record verified 0.10.0 compressed deployment artifact','branch':'main','content':base64.b64encode(content.encode()).decode()}))
+          endpoint='contents/deployment/client-transfer-0.10.0.json'
+          payload={'message':'Record verified compressed client chunks for deployment','branch':'main','content':base64.b64encode(content.encode()).decode()}
+          try:payload['sha']=api(endpoint)['sha']
+          except urllib.error.HTTPError as error:
+              if error.code!=404:raise
+          request=urllib.request.Request('https://api.github.com/repos/'+repo+'/'+endpoint,data=json.dumps(payload).encode(),headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','Content-Type':'application/json','X-GitHub-Api-Version':'2022-11-28'},method='PUT')
+          with urllib.request.urlopen(request,timeout=120) as result:json.load(result)
+          print('VERIFIED_COMPRESSED_CLIENT_READY',len(meta['chunks']),meta['gzipBytes'])
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as summary:summary.write(content)
           PY
-          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/deployment/client-transfer-0.10.0.json" --input artifacts/client/commit-request.json > /dev/null
-          cat artifacts/client/metadata.json >> "$GITHUB_STEP_SUMMARY"
