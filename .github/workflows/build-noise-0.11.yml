@@ -1,0 +1,46 @@
+name: Build pinned RNNoise for VoiceBridge 0.11
+on:
+  push:
+    branches: [voicebridge-0.11.0]
+    paths: ['.github/workflows/build-noise-0.11.yml', 'scripts/Build-RNNoise.sh']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            autoconf automake libtool make git curl tar
+      - name: Build audited upstream source and model
+        shell: msys2 {0}
+        run: bash scripts/Build-RNNoise.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rnnoise-0.2-windows-x64
+          path: artifacts/native/*
+      - name: Store verified dependency for local and release builds
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $PSNativeCommandUseErrorActionPreference=$true
+          $bytes=[IO.File]::ReadAllBytes((Join-Path $PWD 'artifacts/native/voicebridge-rnnoise.dll'))
+          $memory=[IO.MemoryStream]::new()
+          $gzip=[IO.Compression.GZipStream]::new($memory,[IO.Compression.CompressionLevel]::SmallestSize,$true)
+          $gzip.Write($bytes); $gzip.Dispose()
+          $payload=@{version='0.2';sourceCommit='904a876dce1f9ab8860c0a5000ed151f9f6eef58';sha256=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant();bytes=$bytes.Length;gzipBase64=[Convert]::ToBase64String($memory.ToArray())} | ConvertTo-Json -Compress
+          $request=@{message='Store reproducible RNNoise 0.2 Windows x64 build';branch='voicebridge-0.11.0';content=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload))} | ConvertTo-Json -Compress
+          [IO.File]::WriteAllText((Join-Path $PWD 'artifacts/native-request.json'),$request)
+          gh api --method PUT "repos/$env:GITHUB_REPOSITORY/contents/deployment/rnnoise-0.2-x64.json" --input artifacts/native-request.json --jq .commit.sha
+          "Native DLL SHA256: $(([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))).ToLowerInvariant())" | Add-Content $env:GITHUB_STEP_SUMMARY
