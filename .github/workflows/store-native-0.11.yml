@@ -1,0 +1,33 @@
+name: Bundle verified RNNoise dependency
+on:
+  push:
+    branches: [voicebridge-0.11.0]
+    paths: ['.github/workflows/store-native-0.11.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  bundle:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: voicebridge-0.11.0
+      - shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $PSNativeCommandUseErrorActionPreference=$true
+          $meta=Get-Content deployment/rnnoise-0.2-x64.json -Raw | ConvertFrom-Json
+          if($meta.sha256 -ne '8bcf99aee95f01ab6b6f073304dfc0e25e416b254b6ea2f0cd5faa7630b41a02'){throw 'Unexpected native build'}
+          $inputStream=[IO.MemoryStream]::new([Convert]::FromBase64String($meta.gzipBase64))
+          $gzip=[IO.Compression.GZipStream]::new($inputStream,[IO.Compression.CompressionMode]::Decompress)
+          $output=[IO.MemoryStream]::new(); $gzip.CopyTo($output); $gzip.Dispose()
+          $bytes=$output.ToArray()
+          if($bytes.Length -ne $meta.bytes -or [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant() -ne $meta.sha256){throw 'Integrity check failed'}
+          New-Item src/VoiceBridge.App/Native -ItemType Directory -Force | Out-Null
+          [IO.File]::WriteAllBytes((Join-Path $PWD 'src/VoiceBridge.App/Native/voicebridge-rnnoise.dll'),$bytes)
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- src/VoiceBridge.App/Native/voicebridge-rnnoise.dll
+          git commit -m 'Bundle SHA256 verified RNNoise 0.2 Windows x64 library'
+          git push origin HEAD:voicebridge-0.11.0

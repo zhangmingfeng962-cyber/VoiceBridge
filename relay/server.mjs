@@ -4,31 +4,38 @@ import {randomBytes,createHash,timingSafeEqual} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {WebSocketServer,WebSocket} from 'ws';
 import {ScreenRooms,screenConfiguration} from './screen-room.mjs';
+import {Outbound} from './outbound.mjs';
 
 const hex=n=>randomBytes(n).toString('hex'),hash=s=>createHash('sha256').update(s).digest('hex');
 const valid=(value,n)=>typeof value==='string'&&new RegExp('^[a-f0-9]{'+n+'}$').test(value);
 const equal=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
-const headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Permissions-Policy':'microphone=(self), camera=(), display-capture=(self)','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; media-src 'self' blob: mediastream:; worker-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"};
+const headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Permissions-Policy':'microphone=(self), camera=(), display-capture=(self)','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; media-src 'self' blob: mediastream:; worker-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"};
 const json=(res,status,data)=>{res.writeHead(status,{...headers,'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(data));};
 const clean=(value,max)=>typeof value==='string'?value.replace(/[\p{C}]/gu,'').trim().slice(0,max):'';
-export async function startServer({port=Number(process.env.PORT||3000),host='0.0.0.0',origin=process.env.PUBLIC_ORIGIN||process.env.RENDER_EXTERNAL_URL,publishKeyHash=process.env.PUBLISH_KEY_HASH,publicRooms=process.env.PUBLIC_ROOM_CREATION==='1',screenConfig=screenConfiguration()}={}){
+export async function startServer({port=Number(process.env.PORT||3000),host='0.0.0.0',origin=process.env.PUBLIC_ORIGIN||process.env.RENDER_EXTERNAL_URL,publishKeyHash=process.env.PUBLISH_KEY_HASH,publicRooms=process.env.PUBLIC_ROOM_CREATION==='1',screenConfig=screenConfiguration(),now=Date.now,idleMs=1800000,resumeMs=90000}={}){
   if(!valid(publishKeyHash,64))throw new Error('Configure PUBLISH_KEY_HASH. Never publish the sender key.');
   const rooms=new Map(),peers=new Map(),creationAttempts=new Map();let stopped=false;
-  const assets=new Map();for(const name of ['home.html','home.js','room.html','room.js','crypto.js','audio.js','room-worklet.js','room-events.js','screen.js','screen-view.js'])assets.set('/'+name,await readFile(new URL('./web/'+name,import.meta.url)));
-  const send=(socket,value,binary=false)=>{if(socket.readyState!==WebSocket.OPEN)return;if(socket.bufferedAmount>65536){socket.close(4008,'Connection too slow');return;}socket.send(binary?value:JSON.stringify(value),{binary});};
+  const assets=new Map();for(const name of ['home.html','home.js','room.html','room.js','crypto.js','audio.js','room-worklet.js','room-events.js','screen.js','screen-view.js','preferences.js','room.css'])assets.set('/'+name,await readFile(new URL('./web/'+name,import.meta.url)));
+  const send=(socket,value,binary=false)=>{if(socket?.readyState!==WebSocket.OPEN)return;socket.outbound??=new Outbound(socket,now);socket.outbound.push(value,binary);};
   const screens=new ScreenRooms(send,screenConfig);
-  const roster=room=>({type:'members',members:[...peers.values()].filter(p=>p.room===room).map(p=>({id:p.id,name:p.name,desktop:p.role==='desktop',microphone:p.microphone,music:p.music,source:p.music?p.source:''}))});
+  const roster=room=>({type:'members',members:[...peers.values()].filter(p=>p.room===room).map(p=>({id:p.id,name:p.name,desktop:p.role==='desktop',connected:p.socket?.readyState===WebSocket.OPEN,microphone:p.microphone,music:p.music,source:p.music?p.source:''}))});
   const announce=room=>{const data=roster(room);for(const p of peers.values())if(p.room===room){send(p.socket,data);if(p.controller)send(p.controller,data);}screens.notify(room);};
   const removeRoom=id=>{rooms.delete(id);screens.dropRoom(id);for(const p of [...peers.values()])if(p.room===id){p.controller?.close(4004,'Room closed');p.socket.close(4004,'Room closed');peers.delete(p.id);}};
-  const liveRoom=id=>{const room=rooms.get(id);if(!room)return null;if(room.expires<Date.now()||room.created+7200000<Date.now()){removeRoom(id);return null;}return room;};
+  const roomOccupied=id=>[...peers.values()].some(p=>p.room===id&&(p.socket?.readyState===WebSocket.OPEN||p.controller?.readyState===WebSocket.OPEN));
+  const liveRoom=id=>{const room=rooms.get(id);if(!room)return null;
+    if(roomOccupied(id)){room.started=true;room.emptySince=null;}
+    else if(room.started&&room.emptySince===null)room.emptySince=now();
+    if(!room.started&&room.expires<now()||room.started&&room.emptySince!==null&&now()-room.emptySince>=idleMs){removeRoom(id);return null;}return room;
+  };
+  const dropPeer=peer=>{if(peers.get(peer.id)!==peer)return;peers.delete(peer.id);screens.detach(peer.id);peer.controller?.close(4004,'Desktop left');peer.socket?.close(1000,'Left room');const room=rooms.get(peer.room);if(room?.host===peer.id)room.host=null;liveRoom(peer.room);announce(peer.room);};
   const readBody=async req=>{let size=0;const pieces=[];for await(const chunk of req){size+=chunk.length;if(size>2048)throw new Error('Body too large');pieces.push(chunk);}return Buffer.concat(pieces).toString();};
   const server=http.createServer(async(req,res)=>{
     try{
       const url=new URL(req.url,origin||`http://127.0.0.1:${server.address().port}`);
       if(req.headers.origin&&req.headers.origin!==url.origin){json(res,403,{error:'Origin rejected'});return;}
-      if(req.method==='GET'&&url.pathname==='/health'){json(res,200,{service:'VoiceBridge encrypted music relay',protocol:3,version:3,release:'0.10.0',publicRooms,rename:true,ready:true,voiceRooms:true,screenShare:1,screenRelay:!!screenConfig.turn.length,codec:'opus',sampleRate:48000,musicBitrate:256000,frameMs:20});return;}
+      if(req.method==='GET'&&url.pathname==='/health'){json(res,200,{service:'VoiceBridge encrypted music relay',protocol:3,version:3,release:'0.11.0',publicRooms,rename:true,resume:true,resumeMs,idleRoomMs:idleMs,roomTimeLimit:null,ready:true,voiceRooms:true,screenShare:1,screenRelay:!!screenConfig.turn.length,codec:'opus',sampleRate:48000,musicBitrate:256000,frameMs:20});return;}
       if(req.method==='GET'&&(url.pathname==='/'||/^\/room\/[a-f0-9]{32}$/.test(url.pathname))){res.writeHead(200,{...headers,'Content-Type':'text/html; charset=utf-8'});res.end(assets.get(url.pathname==='/'?'/home.html':'/room.html'));return;}
-      if(req.method==='GET'&&assets.has(url.pathname)&&url.pathname.endsWith('.js')){res.writeHead(200,{...headers,'Content-Type':'text/javascript; charset=utf-8'});res.end(assets.get(url.pathname));return;}
+      if(req.method==='GET'&&assets.has(url.pathname)&&(url.pathname.endsWith('.js')||url.pathname.endsWith('.css'))){res.writeHead(200,{...headers,'Content-Type':url.pathname.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8'});res.end(assets.get(url.pathname));return;}
       if(req.method==='POST'&&url.pathname==='/api/rooms'){
         const token=(req.headers.authorization||'').replace(/^Bearer /,''),authorized=valid(token,64)&&equal(hash(token),publishKeyHash);
         if(!authorized&&!publicRooms){json(res,403,{error:'Public room creation is disabled'});return;}
@@ -37,12 +44,14 @@ export async function startServer({port=Number(process.env.PORT||3000),host='0.0
           const attempt=creationAttempts.get(address)||{count:0,until:now+60000};if(attempt.count>=4||creationAttempts.size>1024){res.setHeader('Retry-After','60');json(res,429,{error:'Please wait before creating another room'});return;}attempt.count++;creationAttempts.set(address,attempt);
         }
         await readBody(req);for(const id of [...rooms.keys()])liveRoom(id);if(rooms.size>=4){json(res,429,{error:'Too many active rooms'});return;}
-        const id=hex(16),writeToken=hex(32),listenToken=hex(32);rooms.set(id,{id,writeHash:hash(writeToken),listenHash:hash(listenToken),created:Date.now(),expires:Date.now()+(authorized?120000:30000),host:null});json(res,201,{id,writeToken,listenToken,protocol:3});return;
+        const id=hex(16),writeToken=hex(32),listenToken=hex(32);rooms.set(id,{id,writeHash:hash(writeToken),listenHash:hash(listenToken),created:now(),expires:now()+(authorized?120000:30000),started:false,emptySince:null,host:null});json(res,201,{id,writeToken,listenToken,protocol:3});return;
       }
       const match=url.pathname.match(/^\/api\/rooms\/([a-f0-9]{32})$/);
       if(match&&req.method==='DELETE'){
         const room=liveRoom(match[1]),token=(req.headers.authorization||'').replace(/^Bearer /,'');if(!room){json(res,404,{error:'Room closed'});return;}
-        if(!valid(token,64)||!equal(hash(token),room.writeHash)){json(res,403,{error:'Owner credential invalid'});return;}removeRoom(room.id);json(res,200,{stopped:true});return;
+        if(!valid(token,64)||!equal(hash(token),room.writeHash)){json(res,403,{error:'Owner credential invalid'});return;}
+        if([...peers.values()].some(p=>p.room===room.id)){json(res,409,{error:'Members are still in this room; leaving does not close it'});return;}
+        removeRoom(room.id);json(res,200,{stopped:true});return;
       }
       json(res,/^\/api\/rooms\//.test(url.pathname)?426:404,{error:'Please use VoiceBridge 0.9 or newer'});
     }catch{if(!res.headersSent)json(res,400,{error:'Invalid room request'});else res.end();}
@@ -54,14 +63,19 @@ export async function startServer({port=Number(process.env.PORT||3000),host='0.0
     wss.handleUpgrade(req,socket,head,ws=>wss.emit('connection',ws,match[1]));
   });
   wss.on('connection',(socket,roomId)=>{
-    let peer=null,controllerOf=null,connectionId=null,joined=false,alive=true,frames=[0,0],controls=0,start=Date.now(),lastControl=-1,lastState=-1;
-    const deadline=setTimeout(()=>socket.close(4003,'Join required'),5000);deadline.unref();socket.on('error',()=>{});socket.on('pong',()=>{alive=true;});
-    socket.on('close',()=>{
+    let peer=null,controllerOf=null,connectionId=null,joined=false,lastSeen=now(),frames=[0,0],controls=0,start=Date.now(),lastControl=-1;
+    const deadline=setTimeout(()=>socket.close(4003,'Join required'),10000);deadline.unref();socket.on('error',()=>{});socket.on('pong',()=>{lastSeen=now();});
+    socket.on('close',(code)=>{
       clearTimeout(deadline);
       if(controllerOf)screens.detach(controllerOf.id,socket);
-      if(peer)screens.detach(peer.id);
       if(controllerOf&&controllerOf.controller===socket){controllerOf.controller=null;controllerOf.microphone=false;send(controllerOf.socket,{type:'controllerDetached'});announce(roomId);}
-      if(peer){peers.delete(peer.id);peer.controller?.close(4004,'Desktop left');const room=rooms.get(roomId);if(room?.host===peer.id)removeRoom(roomId);else announce(roomId);}
+      if(peer&&peer.socket===socket&&peers.get(peer.id)===peer){
+        if(!peer.resumeHash||code===1000||code===1001||code===4003){dropPeer(peer);return;}
+        peer.disconnectedAt=now();peer.microphone=false;peer.music=false;
+        // Keep the paired page and an existing independent video connection alive.
+        if(peer.role==='browser')screens.suspend(peer.id,socket);
+        send(peer.controller,{type:'desktopConnection',connected:false});liveRoom(roomId);announce(roomId);
+      }
     });
     socket.on('message',(data,binary)=>{
       try{
@@ -70,14 +84,22 @@ export async function startServer({port=Number(process.env.PORT||3000),host='0.0
           if(binary)throw new Error('Join required');const input=JSON.parse(data.toString()),room=liveRoom(roomId);if(!room||input.type!=='join'||input.version!==3)throw new Error('Upgrade required');
           if(input.role==='controller'){
             const target=peers.get(input.memberId);if(!target||target.room!==roomId||target.role!=='desktop'||!valid(input.controlToken,64)||!equal(input.controlToken,target.controlToken))throw new Error('Control capability invalid');
-            target.controller?.close(4001,'Replaced by another control page');controllerOf=target;target.controller=socket;connectionId=hex(16);target.connectionId=connectionId;target.lastState=-1;if(target.hadController)target.microphone=false;target.hadController=true;
+            target.controller?.close(4001,'Replaced by another control page');controllerOf=target;target.controller=socket;connectionId=hex(16);target.connectionId=connectionId;target.lastState=-1;target.pendingControl=null;if(target.hadController)target.microphone=false;target.hadController=true;
             joined=true;clearTimeout(deadline);send(socket,{type:'welcome',role:'controller',id:target.id,connectionId});screens.attach(target,socket);send(target.socket,{type:'controllerAttached',connectionId});send(socket,roster(roomId));announce(roomId);return;
           }
           if(!['desktop','browser'].includes(input.role)||!valid(input.token,64)||!equal(hash(input.token),room.listenHash))throw new Error('Invitation invalid');
+          if(input.resume){
+            const previous=peers.get(input.resume.memberId);
+            if(!previous||previous.room!==roomId||previous.role!==input.role||!valid(input.resume.token,64)||!equal(hash(input.resume.token),previous.resumeHash)||previous.disconnectedAt!==null&&now()-previous.disconnectedAt>resumeMs){socket.close(4010,'Resume expired');return;}
+            const old=previous.socket;peer=previous;peer.socket=socket;peer.disconnectedAt=null;old?.close(4001,'Connection replaced');joined=true;clearTimeout(deadline);room.emptySince=null;
+            send(socket,{type:'welcome',role:peer.role,id:peer.id,resumed:true,resumeMs,controlToken:peer.controlToken,controllerPresent:!!peer.controller,connectionId:peer.connectionId,pendingControl:peer.pendingControl});
+            if(peer.role==='browser')screens.attach(peer,socket,true);
+            send(peer.controller,{type:'desktopConnection',connected:true});announce(roomId);return;
+          }
           if([...peers.values()].filter(p=>p.room===roomId).length>=8){socket.close(4009,'Room full');return;}
-          const owner=valid(input.hostToken,64)&&equal(hash(input.hostToken),room.writeHash);if(owner&&room.host)throw new Error('Owner already joined');
-          peer={id:hex(16),name:clean(input.name,20)||'朋友',room:roomId,role:input.role,socket,controller:null,controlToken:input.role==='desktop'?hex(32):null,connectionId:null,lastState:-1,hadController:false,microphone:false,music:false,source:'',lastSequences:[-1,-1]};
-          peers.set(peer.id,peer);if(owner)room.host=peer.id;joined=true;clearTimeout(deadline);send(socket,{type:'welcome',role:peer.role,id:peer.id,...(peer.controlToken?{controlToken:peer.controlToken}:{})});if(peer.role==='browser')screens.attach(peer,socket);announce(roomId);return;
+          const owner=valid(input.hostToken,64)&&equal(hash(input.hostToken),room.writeHash),resumeToken=input.canResume?hex(32):null;
+          peer={id:hex(16),name:clean(input.name,20)||'朋友',room:roomId,role:input.role,socket,controller:null,controlToken:input.role==='desktop'?hex(32):null,connectionId:null,lastState:-1,hadController:false,microphone:false,music:false,source:'',lastSequences:[-1,-1],resumeHash:resumeToken?hash(resumeToken):null,disconnectedAt:null,pendingControl:null};
+          peers.set(peer.id,peer);if(owner)room.host=peer.id;room.started=true;room.emptySince=null;joined=true;clearTimeout(deadline);send(socket,{type:'welcome',role:peer.role,id:peer.id,resumeToken,resumeMs,...(peer.controlToken?{controlToken:peer.controlToken}:{})});if(peer.role==='browser')screens.attach(peer,socket);announce(roomId);return;
         }
         if(!liveRoom(roomId)){socket.close(4004,'Room closed');return;}
         if(binary){
@@ -87,6 +109,8 @@ export async function startServer({port=Number(process.env.PORT||3000),host='0.0
           const packet=Buffer.concat([Buffer.from(peer.id,'hex'),data]);for(const target of peers.values())if(target.room===roomId&&target.id!==peer.id)send(target.socket,packet,true);return;
         }
         const message=JSON.parse(data.toString());
+        if(message.type==='ping'){if(++controls>60)throw new Error('Control rate');send(socket,{type:'pong',at:Number.isFinite(message.at)?message.at:null});return;}
+        if(message.type==='leave'&&peer){dropPeer(peer);return;}
         if(typeof message.type==='string'&&message.type.startsWith('screen:')){screens.handle(controllerOf||peer,socket,message);return;}
         if(++controls>60)throw new Error('Control rate');
         if(message.type==='rename'){
@@ -94,7 +118,7 @@ export async function startServer({port=Number(process.env.PORT||3000),host='0.0
         }
         if(controllerOf){
           if(message.type!=='control'||!Number.isSafeInteger(message.sequence)||message.sequence<=lastControl||typeof message.iv!=='string'||message.iv.length!==16||typeof message.data!=='string'||message.data.length>64000)throw new Error('Control packet invalid');
-          lastControl=message.sequence;send(controllerOf.socket,{...message,connectionId});return;
+          lastControl=message.sequence;controllerOf.pendingControl={...message,connectionId};send(controllerOf.socket,controllerOf.pendingControl);return;
         }
         if(message.type==='state'&&peer.role==='desktop'){
           if(message.connectionId!==peer.connectionId)return;
@@ -107,14 +131,17 @@ export async function startServer({port=Number(process.env.PORT||3000),host='0.0
         throw new Error('Unknown room message');
       }catch{socket.close(4003,'Invalid room message');}
     });
-    socket.roomHeartbeat=()=>{if(!alive){socket.terminate();return;}alive=false;socket.ping();};
+    socket.roomHeartbeat=()=>{if(now()-lastSeen>=45000){socket.terminate();return;}if(socket.readyState===WebSocket.OPEN)socket.ping();};
   });
-  const cleanup=setInterval(()=>{
-    for(const room of rooms.values()){if(room.host&&peers.has(room.host))room.expires=Date.now()+120000;liveRoom(room.id);}
-    for(const socket of wss.clients)socket.roomHeartbeat?.();
-  },15000);cleanup.unref();
+  const maintenance=({heartbeat=true}={})=>{
+    for(const peer of [...peers.values()])if(peer.disconnectedAt!==null&&now()-peer.disconnectedAt>=resumeMs)dropPeer(peer);
+    for(const id of [...rooms.keys()])liveRoom(id);
+    if(heartbeat)for(const socket of wss.clients)socket.roomHeartbeat?.();
+  };
+  const cleanup=setInterval(maintenance,15000);cleanup.unref();
+  const flush=setInterval(()=>{for(const socket of wss.clients)socket.outbound?.flush();},10);flush.unref();
   server.headersTimeout=10000;server.requestTimeout=15000;server.maxConnections=80;
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,host,resolve);});
-  return {server,rooms,peers,screens,url:`http://127.0.0.1:${server.address().port}`,stop:async()=>{stopped=true;clearInterval(cleanup);for(const socket of wss.clients)socket.terminate();wss.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));rooms.clear();peers.clear();screens.clients.clear();screens.shares.clear();creationAttempts.clear();}};
+  return {server,rooms,peers,screens,maintenance,url:`http://127.0.0.1:${server.address().port}`,stop:async()=>{stopped=true;clearInterval(cleanup);clearInterval(flush);for(const socket of wss.clients)socket.terminate();wss.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));rooms.clear();peers.clear();screens.clients.clear();screens.shares.clear();creationAttempts.clear();}};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){const running=await startServer();console.log('VoiceBridge room relay ready');for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>void running.stop().then(()=>process.exit()));}

@@ -17,7 +17,8 @@ export class ScreenView{
     byId('screenSoundGain').oninput=()=>{this.setVolume(Number(byId('screenSoundGain').value));this.syncSound();};
     byId('screenSource').onchange=()=>this.setSource(byId('screenSource').value);
     byId('screenListenGain').oninput=()=>{if(this.state.owner)this.setListening(this.state.owner,Number(byId('screenListenGain').value));this.syncSound();};
-    byId('screenExpand').onclick=()=>{const panel=byId('screenPanel');panel.classList.toggle('screenExpanded');byId('screenExpand').textContent=panel.classList.contains('screenExpanded')?'还原布局':'放大画面';};
+    byId('screenExpand').onclick=()=>{const panel=byId('screenPanel');this.collapsed=false;panel.classList.toggle('screenExpanded');byId('screenExpand').textContent=panel.classList.contains('screenExpanded')?'还原布局':'放大画面';this.render();};
+    byId('screenCollapse').onclick=()=>{this.collapsed=!this.collapsed;this.render();};
     byId('screenFullscreen').onclick=async()=>{try{await byId('screenStage').requestFullscreen();}catch{this.status('浏览器未允许全屏，可以使用“放大画面”');}};
     byId('screenExitFullscreen').onclick=()=>void document.exitFullscreen();
     document.addEventListener('fullscreenchange',()=>{byId('screenExitFullscreen').hidden=document.fullscreenElement!==byId('screenStage');});
@@ -33,11 +34,13 @@ export class ScreenView{
     this.engine.audioPressure=this.audioPressure;this.render();
   }
   receive(message){return this.engine?.receive(message);}
+  resume(){this.engine?.resume();}
   status(message){this.message=message;byId('screenStatus').textContent=message;}
   metrics(metric){
     if(!this.state.owner)return;
     const resolution=metric.width?` · ${metric.width} × ${metric.height}${metric.fps?' / '+metric.fps+' 帧':''}`:'';
-    byId('screenNetwork').textContent=(metric.relay?'服务器中继':'直连')+(metric.rttMs?' · 网络往返 '+metric.rttMs+' ms':'')+resolution+(metric.owner&&metric.bitrate?' · 此路码率 '+Math.round(metric.bitrate/1000)+' kbps':'');
+    const limited=metric.limited==='cpu'?' · 设备编码负载偏高':metric.limited==='bandwidth'||metric.targetFps&&metric.targetFps<60?' · 当前帧率受网络或档位限制':'';
+    byId('screenNetwork').textContent=(metric.owner?'发送':'接收')+' · '+(metric.relay?'服务器中继':'直连')+(metric.rttMs?' · 往返 '+metric.rttMs+' ms':'')+resolution+(metric.owner&&metric.bitrate?' · '+Math.round(metric.bitrate/1000)+' kbps':'')+limited;
   }
   syncSound(){
     const value=this.sound(),own=this.state.owner&&this.state.self;
@@ -57,6 +60,9 @@ export class ScreenView{
   }
   render(){
     const s=this.state,own=!!s.owner&&s.self,other=!!s.owner&&!own,ready=this.joined&&s.supported;
+    byId('screenPanel').classList.toggle('hasShare',!!s.owner);
+    byId('screenStage').hidden=!s.owner||!!this.collapsed;byId('screenCollapse').hidden=!s.owner;byId('screenCollapse').textContent=this.collapsed?'展开预览':'收起预览';
+    if(!s.owner){this.collapsed=false;byId('screenPanel').classList.remove('screenExpanded');byId('screenExpand').textContent='放大画面';}
     const statusKey=!this.joined?'offline':!s.supported?'unsupported':s.session||'idle';if(this.statusKey!==statusKey){this.statusKey=statusKey;this.message='';}
     const compatible=typeof globalThis.RTCPeerConnection==='function',capture=!!navigator.mediaDevices?.getDisplayMedia;
     byId('screenStart').disabled=!ready||!!s.owner||s.selecting||!compatible||!capture;byId('screenStart').textContent=s.selecting?'正在选择画面…':'共享软件窗口／桌面';
@@ -66,7 +72,7 @@ export class ScreenView{
     byId('screenWatch').hidden=!other;byId('screenWatch').textContent=s.watching?'停止观看':'观看画面';
     byId('screenRetry').hidden=!other||s.paused;
     byId('screenQuality').disabled=!ready||other;byId('screenAuto').disabled=!ready||other;
-    byId('screenQuality').value=s.mode||'balanced';byId('screenAuto').checked=s.auto!==false;
+    byId('screenQuality').value=s.mode||'clear';byId('screenAuto').checked=s.auto!==false;
     byId('screenOwner').textContent=s.owner?(own?'你正在共享':s.name+' 正在共享')+(s.surface?' · '+(names[s.surface]||'画面'):''):'房间内任何成员都可以共享';
     byId('screenLive').textContent=s.owner?(s.paused?'已暂停':'共享中'):'未共享';byId('screenLive').classList.toggle('paused',!!s.paused);
     byId('screenViewers').textContent=s.owner?(s.viewers?.length||0)+' 人观看':'';

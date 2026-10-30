@@ -62,6 +62,7 @@ public sealed class MusicSources : IFloatSource
     private IFloatSource[] sources = [];
     private float[] scratch = new float[4096];
     public void Replace(IEnumerable<IFloatSource> value) => Volatile.Write(ref sources, value.ToArray());
+    public void Clear() { foreach (var source in Volatile.Read(ref sources)) if (source is LiveSampleQueue queue) queue.Clear(); }
     public int Read(float[] buffer, int offset, int count)
     {
         Array.Clear(buffer, offset, count);

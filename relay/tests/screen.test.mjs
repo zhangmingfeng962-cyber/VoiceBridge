@@ -74,8 +74,8 @@ test('screen budget is shared across rooms and viewers; presenter loss frees the
   const ctx=await setup();try{
     const r=await room(ctx.service),r2=await room(ctx.service),a=await join(ctx,r),b=await join(ctx,r),c=await join(ctx,r),other=await join(ctx,r2),session=await claim(a);await claim(other);
     b.send({type:'screen:watch',session});await b.next(m=>m.type==='screen:watching');c.send({type:'screen:watch',session});await c.next(m=>m.type==='screen:watching');
-    assert.equal(ctx.service.screens.state(r.id).maxBitrate,1250000);
-    const released=b.next(m=>m.type==='screen:state'&&!m.owner,true);a.socket.close();await released;assert.equal(ctx.service.screens.shares.has(r.id),false);assert.equal(ctx.service.screens.state(r2.id).maxBitrate,5000000);
+    assert.equal(ctx.service.screens.state(r.id).maxBitrate,2000000);
+    const released=b.next(m=>m.type==='screen:state'&&!m.owner,true);a.socket.close();await released;assert.equal(ctx.service.screens.shares.has(r.id),false);assert.equal(ctx.service.screens.state(r2.id).maxBitrate,4500000);
   }finally{await ctx.close();}
 });
 

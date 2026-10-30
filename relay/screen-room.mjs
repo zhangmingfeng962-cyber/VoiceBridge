@@ -33,21 +33,26 @@ export class ScreenRooms{
     const share=this.shares.get(room);
     if(!share)return {type:'screen:state',owner:null};
     const client=this.clients.get(share.owner);
-    return {type:'screen:state',owner:share.owner,name:client?.peer.name||'成员',session:share.session,paused:share.paused,mode:share.mode,surface:share.surface,viewers:[...share.viewers.keys()],maxBitrate:Math.floor(this.config.budget/Math.max(1,this.shares.size)/Math.max(1,share.viewers.size))};
+    let relayCount=0;for(const item of this.shares.values())for(const viewer of item.viewers.keys())if(item.routes.get(viewer)!=='direct')relayCount++;
+    const relayBudget=Math.max(32000,Math.floor(this.config.budget*.8/Math.max(1,relayCount))),budgets={};
+    for(const viewer of share.viewers.keys())budgets[viewer]=share.routes.get(viewer)==='direct'?4500000:relayBudget;
+    return {type:'screen:state',owner:share.owner,name:client?.peer.name||'成员',connected:!client?.suspended,session:share.session,paused:share.paused,mode:share.mode,surface:share.surface,viewers:[...share.viewers.keys()],budgets,maxBitrate:Math.min(4500000,...Object.values(budgets))};
   }
   notify(room){const message=this.state(room);for(const client of this.clients.values())if(client.peer.room===room)this.emit(client,message);}
   notifyAll(){for(const room of new Set([...this.clients.values()].map(c=>c.peer.room)))this.notify(room);}
-  attach(peer,socket){
-    this.detach(peer.id);
-    const client={peer,socket,start:Date.now(),count:0};this.clients.set(peer.id,client);
+  attach(peer,socket,preserve=false){
+    if(!preserve)this.detach(peer.id);
+    const client={peer,socket,start:Date.now(),count:0,suspended:false};this.clients.set(peer.id,client);
     this.emit(client,{type:'screen:hello',version:1,...screenIce(this.config,peer.room,peer.id)});
     this.emit(client,this.state(peer.room));
+    if(preserve)this.notifyAll();
   }
+  suspend(member,socket){const client=this.clients.get(member);if(client?.socket===socket){client.suspended=true;this.notifyAll();}}
   detach(member,socket){
     const client=this.clients.get(member);if(!client||socket&&client.socket!==socket)return;
     this.clients.delete(member);const share=this.shares.get(client.peer.room);
     if(share?.owner===member)this.shares.delete(client.peer.room);
-    else if(share?.viewers.delete(member))this.emit(this.clients.get(share.owner),{type:'screen:viewer',session:share.session,viewer:member,joined:false});
+    else if(share?.viewers.delete(member)){share.routes.delete(member);this.emit(this.clients.get(share.owner),{type:'screen:viewer',session:share.session,viewer:member,joined:false});}
     this.notifyAll();
   }
   dropRoom(room){this.shares.delete(room);for(const [member,client] of this.clients)if(client.peer.room===room)this.clients.delete(member);this.notifyAll();}
@@ -62,19 +67,28 @@ export class ScreenRooms{
     if(message.type==='screen:claim'){
       if(typeof message.requestId!=='string'||!/^[a-z0-9-]{1,32}$/i.test(message.requestId)||!modes.has(message.mode)||!surfaces.has(message.surface)){reject('invalid');return;}
       if(share){reject('busy');return;}
-      const next={owner:peer.id,session:id(),paused:false,mode:message.mode,surface:message.surface,viewers:new Map()};this.shares.set(room,next);
+      const next={owner:peer.id,session:id(),paused:false,mode:message.mode,surface:message.surface,viewers:new Map(),routes:new Map()};this.shares.set(room,next);
       this.emit(client,{type:'screen:claimed',requestId:message.requestId,session:next.session});this.notifyAll();return;
     }
     if(!share||message.session!==share.session){reject('stale');return;}
     if(message.type==='screen:watch'){
       if(peer.id===share.owner){reject('invalid');return;}
       if(share.viewers.has(peer.id)&&!message.restart)return;
-      const link=id();share.viewers.set(peer.id,link);
+      const link=id();share.viewers.set(peer.id,link);share.routes.delete(peer.id);
       this.emit(client,{type:'screen:watching',owner:share.owner,session:share.session,link});
       this.emit(this.clients.get(share.owner),{type:'screen:viewer',viewer:peer.id,session:share.session,link,joined:true});this.notify(room);return;
     }
     if(message.type==='screen:unwatch'){
-      if(share.viewers.delete(peer.id)){this.emit(this.clients.get(share.owner),{type:'screen:viewer',session:share.session,viewer:peer.id,joined:false});this.notify(room);}return;
+      if(share.viewers.delete(peer.id)){share.routes.delete(peer.id);this.emit(this.clients.get(share.owner),{type:'screen:viewer',session:share.session,viewer:peer.id,joined:false});this.notifyAll();}return;
+    }
+    if(message.type==='screen:route'){
+      const owner=peer.id===share.owner,viewer=owner?message.to:peer.id,target=this.clients.get(message.to);
+      if(typeof message.relay!=='boolean'||!target||target.peer.room!==room||!share.viewers.has(viewer)||(!owner&&message.to!==share.owner)||share.viewers.get(viewer)!==message.link){reject('forbidden');return;}
+      share.routes.set(viewer,message.relay?'relay':'direct');this.notifyAll();return;
+    }
+    if(message.type==='screen:refresh'){
+      if(peer.id===share.owner||message.to!==share.owner||share.viewers.get(peer.id)!==message.link){reject('forbidden');return;}
+      this.emit(this.clients.get(share.owner),{type:'screen:refresh',session:share.session,link:message.link,from:peer.id});return;
     }
     if(message.type==='screen:stop'||message.type==='screen:update'){
       if(peer.id!==share.owner){reject('forbidden');return;}

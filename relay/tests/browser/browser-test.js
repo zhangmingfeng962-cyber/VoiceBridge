@@ -27,7 +27,7 @@ el('run').onclick=async()=>{
     const before=await frames(b);await a.screen.pause(false);await wait(async()=>!b.state.paused&&await frames(b)>before+4,'resume');record('恢复后继续发送同一来源');
     a.screen.capture=async()=>window.fixtureVideo('Synthetic replacement B','#264ca6');await a.screen.select(true);
     await wait(()=>{const color=sample(b.video);return color[2]>color[1]*1.5;},'replacement pixels');record('来源切换后观看端收到来源 B 像素');
-    await a.screen.quality('clear',true);for(const item of a.screen.links.values()){await item.work;if(item.sender.getParameters().encodings[0].maxBitrate>2400000)throw Error('Bitrate limit missing');}record('浏览器实际发送器应用画质与码率限制');
+    await a.screen.quality('clear',true);for(const item of a.screen.links.values()){await item.work;if(item.sender.getParameters().encodings[0].maxBitrate>4500000)throw Error('Bitrate limit missing');}record('浏览器实际发送器应用画质与码率限制');
     const old=a.screen.stream.getVideoTracks()[0];a.screen.stop();await wait(()=>!b.state.owner&&!c.state.owner,'stop');if(old.readyState!=='ended')throw Error('Capture track not released');record('结束后释放画面轨道和单人共享占用');
     await b.screen.select();await wait(async()=>c.state.owner===b.id&&await frames(c)>4,'next presenter');record('另一位成员可以接着共享');
     b.socket.close();await wait(()=>!c.state.owner,'presenter disconnect');record('共享者断线自动释放占用');

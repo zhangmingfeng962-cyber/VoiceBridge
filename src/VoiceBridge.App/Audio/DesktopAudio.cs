@@ -8,6 +8,7 @@ namespace VoiceBridge.App.Audio;
 public sealed record AudioOptions
 {
     public bool Microphone { get; init; }
+    public bool NoiseSuppression { get; init; } = true;
     public string MicrophoneId { get; init; } = "";
     public string OutputId { get; init; } = "";
     public float MicrophoneGain { get; init; } = 100;
@@ -49,6 +50,9 @@ public sealed class DesktopAudio : IAsyncDisposable
     public string Status { get; private set; } = "未开启麦克风或音乐共享";
     public float MicrophonePeak { get; private set; }
     public bool Talking { get; private set; }
+    private volatile bool networkConnected;
+    private int networkEpoch;
+    public void SetNetworkConnected(bool connected) { networkConnected = connected; Interlocked.Increment(ref networkEpoch); }
     public DesktopAudio(Action<byte, byte[]> publish) => this.publish = publish;
     public async Task StartAsync()
     {
@@ -56,7 +60,7 @@ public sealed class DesktopAudio : IAsyncDisposable
         monitor = Task.Run(MonitorAsync);
         pump = new Thread(Pump) { IsBackground = true, Name = "Room Opus transmit" }; pump.Start();
         // Listening starts with the room, but microphone opens on entry as requested; application capture remains off.
-        await ApplyAsync(new() { Microphone = true });
+        await ApplyAsync(new() { Microphone = true, NoiseSuppression = new ProfileStore().Read().NoiseSuppression });
     }
     public Task ApplyAsync(AudioOptions next) { long approval = Interlocked.Read(ref privacyEpoch); return Task.Run(() => ApplyCoreAsync(next, approval)); }
     private async Task ApplyCoreAsync(AudioOptions next, long approval)
@@ -164,25 +168,37 @@ public sealed class DesktopAudio : IAsyncDisposable
     private void Pump()
     {
         using var voiceEncoder = new RoomEncoder(false); using var musicEncoder = new RoomEncoder(true);
+        MicrophoneDenoiser? denoiser = null; bool denoiseFailed = false, pttReleased = true; int epoch = networkEpoch;
         var clock = Stopwatch.StartNew(); double next = 20; float[] stereo = new float[1920], mono = new float[960];
         while (!stop.IsCancellationRequested)
         {
             double remaining = next - clock.Elapsed.TotalMilliseconds;
             if (remaining > 0 && stop.Token.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(remaining))) break;
             var current = Options; var input = Volatile.Read(ref microphoneInput);
-            bool talking = Interlocked.Read(ref configuredEpoch) == Interlocked.Read(ref privacyEpoch) && current.Microphone && input is not null && (current.TalkMode == "free" || (GetAsyncKeyState(current.TalkKey) & 0x8000) != 0);
+            bool keyDown = (GetAsyncKeyState(current.TalkKey) & 0x8000) != 0;
+            if (epoch != networkEpoch) { epoch = networkEpoch; input?.Queue.Clear(); music.Clear(); wasTalking = false; pttReleased = false; denoiser?.Dispose(); denoiser = null; }
+            if (!keyDown) pttReleased = true;
+            bool talking = networkConnected && Interlocked.Read(ref configuredEpoch) == Interlocked.Read(ref privacyEpoch) && current.Microphone && input is not null && (current.TalkMode == "free" || pttReleased && keyDown);
             Talking = talking;
             try
             {
                 if (talking)
                 {
                     if (!wasTalking) input!.Queue.Clear(); input!.Stereo.Read(stereo, 0, stereo.Length); float peak = 0;
-                    for (int i = 0; i < mono.Length; i++) { float sample = (stereo[i * 2] + stereo[i * 2 + 1]) * .5f * current.MicrophoneGain / 100; peak = Math.Max(peak, Math.Abs(sample)); mono[i] = Math.Clamp(float.IsFinite(sample) ? sample : 0, -.95f, .95f); }
+                    for (int i = 0; i < mono.Length; i++) mono[i] = (stereo[i * 2] + stereo[i * 2 + 1]) * .5f;
+                    if (current.NoiseSuppression && !denoiseFailed)
+                    {
+                        try { denoiser ??= new MicrophoneDenoiser(); denoiser.Process(mono); }
+                        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or InvalidOperationException)
+                        { denoiseFailed = true; Status = "降噪不可用，人声继续传送：" + ex.Message; }
+                    }
+                    else if (!current.NoiseSuppression) { denoiser?.Dispose(); denoiser = null; denoiseFailed = false; }
+                    for (int i = 0; i < mono.Length; i++) { float sample = mono[i] * current.MicrophoneGain / 100; peak = Math.Max(peak, Math.Abs(sample)); mono[i] = Math.Clamp(float.IsFinite(sample) ? sample : 0, -.95f, .95f); }
                     MicrophonePeak = peak; publish(0, voiceEncoder.Encode(mono));
                 }
                 else { MicrophonePeak = 0; if (wasTalking) input?.Queue.Clear(); }
                 wasTalking = talking;
-                if (current.Sharing)
+                if (networkConnected && current.Sharing)
                 {
                     music.Read(stereo, 0, stereo.Length); for (int i = 0; i < stereo.Length; i++) stereo[i] = float.IsFinite(stereo[i]) ? Math.Clamp(stereo[i] * current.MusicGain / 100, -1, 1) : 0;
                     publish(1, musicEncoder.Encode(stereo));
@@ -191,6 +207,7 @@ public sealed class DesktopAudio : IAsyncDisposable
             catch (Exception ex) { Status = "音频发送中断：" + ex.GetBaseException().Message; }
             next += 20; if (next < clock.Elapsed.TotalMilliseconds - 40) next = clock.Elapsed.TotalMilliseconds + 20;
         }
+        denoiser?.Dispose();
     }
     public ValueTask DisposeAsync() { lock (disposeGate) return new(disposal ??= Task.Run(DisposeCoreAsync)); }
     private async Task DisposeCoreAsync()

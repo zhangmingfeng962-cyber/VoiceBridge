@@ -28,7 +28,8 @@ public static class SelfTest
             {
                 using var encoder = new RoomEncoder(true); using var decoder = new RoomDecoder(true); float[] pcm = new float[1920]; long frame = 0; double energy = 0;
                 for (int n = 0; n < 50; n++) { Signal(pcm, ref frame); var result = decoder.Decode(encoder.Encode(pcm)); energy += result.Sum(x => x * x); }
-                File.WriteAllText(report, JsonSerializer.Serialize(new { Codec = "Opus 48 kHz stereo", Frames = 50, DecodedEnergy = energy, MicrophoneOpened = false, ProcessCaptureOpened = false }));
+                using var suppression = new MicrophoneDenoiser(); var silence = new float[960]; suppression.Process(silence);
+                File.WriteAllText(report, JsonSerializer.Serialize(new { Codec = "Opus 48 kHz stereo", Frames = 50, DecodedEnergy = energy, NoiseSuppression = "RNNoise 0.2 loaded", NoiseOutputFinite = silence.All(float.IsFinite), MicrophoneOpened = false, ProcessCaptureOpened = false }));
             }
             Application.Current.Shutdown(0);
         }

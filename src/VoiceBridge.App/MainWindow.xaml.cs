@@ -11,11 +11,13 @@ public partial class MainWindow : Window
     private RoomClient? room;
     private bool busy, closing, canClose;
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly ProfileStore profile = new();
     public MainWindow()
     {
-        InitializeComponent();
+        InitializeComponent(); NicknameBox.Text = profile.Read().Nickname;
+        NicknameBox.LostFocus += (_, _) => SaveNickname();
         UpdateControls(); Closing += OnClosing;
-        timer.Tick += async (_, _) => { if (room is not null && !busy) { if (!room.Connected) await LeaveAsync(); else { StatusText.Text = room.Status + "\n" + (room.Audio.Options.Microphone ? "麦克风：开启" : "麦克风：关闭") + "\n" + room.Audio.Status; UpdateControls(); } } }; timer.Start();
+        timer.Tick += async (_, _) => { if (room is not null && !busy) { if (!room.SessionActive) { string reason = room.Status; await LeaveAsync(); StatusText.Text = reason; } else { NicknameBox.Text = room.Name; StatusText.Text = room.Status + "\n" + (room.Audio.Options.Microphone ? "麦克风：开启" : "麦克风：关闭") + "\n" + room.Audio.Status; UpdateControls(); } } }; timer.Start();
     }
     private void UpdateControls()
     {
@@ -27,6 +29,7 @@ public partial class MainWindow : Window
     private async Task ConnectAsync(bool create)
     {
         if (busy || room is not null) return; busy = true; UpdateControls(); var candidate = new RoomClient();
+        SaveNickname();
         try
         {
             StatusText.Text = "正在连接房间…";
@@ -37,6 +40,7 @@ public partial class MainWindow : Window
         catch (Exception ex) { await candidate.DisposeAsync(); StatusText.Text = "未进房：" + ex.GetBaseException().Message; }
         finally { busy = false; UpdateControls(); }
     }
+    private void SaveNickname() { string name = ProfileSettings.CleanName(NicknameBox.Text); if (name.Length > 0) profile.Save(profile.Read() with { Nickname = name }); }
     private void Paste_Click(object sender, RoutedEventArgs e) { try { if (Clipboard.ContainsText()) InviteBox.Text = Clipboard.GetText(); } catch { StatusText.Text = "无法读取剪贴板，请手动粘贴邀请。"; } }
     private void OpenRoom() { if (room?.Connected == true) Process.Start(new ProcessStartInfo(room.ControllerLink) { UseShellExecute = true }); }
     private void Open_Click(object sender, RoutedEventArgs e) { try { OpenRoom(); } catch (Exception ex) { StatusText.Text = ex.Message; } }
@@ -46,6 +50,6 @@ public partial class MainWindow : Window
     private async void OnClosing(object? sender, CancelEventArgs e)
     {
         if (canClose) return; e.Cancel = true; if (closing) return; if (busy) { StatusText.Text = "正在完成连接操作，请稍后关闭。"; return; }
-        closing = true; timer.Stop(); await LeaveAsync(); canClose = true; Close();
+        closing = true; SaveNickname(); timer.Stop(); await LeaveAsync(); canClose = true; Close();
     }
 }

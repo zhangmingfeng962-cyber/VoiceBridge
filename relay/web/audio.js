@@ -1,5 +1,5 @@
 export class BrowserAudio{
-  constructor(send,stats,status){this.send=send;this.onStats=stats;this.status=status;this.decoders=new Map();this.gains=new Map();this.capture=[null,null];this.micEpoch=0;this.shareEpoch=0;this.pressed=false;this.options={microphone:false,microphoneGain:100,speakerGain:100,talkMode:'free',talkKey:86,autoBuffer:true,memberVoice:{},memberMusic:{}};}
+  constructor(send,stats,status){this.send=send;this.onStats=stats;this.status=status;this.decoders=new Map();this.gains=new Map();this.capture=[null,null];this.micEpoch=0;this.shareEpoch=0;this.pressed=false;this.networkConnected=true;this.options={microphone:false,noiseSuppression:true,microphoneGain:100,speakerGain:100,talkMode:'free',talkKey:86,autoBuffer:true,memberVoice:{},memberMusic:{}};}
   async start(){
     if(!window.AudioDecoder||!window.AudioEncoder)throw new Error('当前浏览器缺少实时音频编码，请使用新版 Edge / Chrome 或 Windows 客户端');
     for(const channels of [1,2])if(!(await AudioDecoder.isConfigSupported({codec:'opus',sampleRate:48000,numberOfChannels:channels})).supported)throw new Error('浏览器不支持 Opus 解码，请使用 Windows 客户端');
@@ -7,7 +7,15 @@ export class BrowserAudio{
     this.mixer=new AudioWorkletNode(this.context,'voicebridge-room-mixer',{numberOfInputs:0,numberOfOutputs:1,outputChannelCount:[2]});this.mixer.connect(this.context.destination);this.noticeGain=this.context.createGain();this.noticeGain.connect(this.context.destination);this.mixer.port.onmessage=({data})=>this.onStats(data);this.configure(this.options);
   }
   configure(options){this.options={...this.options,...options};if(this.noticeGain)this.noticeGain.gain.value=this.options.speakerGain/100;this.mixer?.port.postMessage({type:'master',value:this.options.speakerGain/100});this.mixer?.port.postMessage({type:'auto',value:this.options.autoBuffer});
-    for(const [id,value] of Object.entries(this.options.memberVoice||{}))this.setGain(id,0,value);for(const [id,value] of Object.entries(this.options.memberMusic||{}))this.setGain(id,1,value);this.updateGate();this.capture[1]?.node.port.postMessage({enabled:true,gain:(this.options.musicGain??100)/100,epoch:this.shareEpoch});}
+    for(const [id,value] of Object.entries(this.options.memberVoice||{}))this.setGain(id,0,value);for(const [id,value] of Object.entries(this.options.memberMusic||{}))this.setGain(id,1,value);this.updateGate();this.capture[1]?.node.port.postMessage({enabled:this.networkConnected,gain:(this.options.musicGain??100)/100,epoch:this.shareEpoch});}
+  setNetworkConnected(value){this.networkConnected=value;this.keyUp();this.micEpoch++;this.shareEpoch++;this.configure(this.options);}
+  async noiseSuppression(value){
+    this.options.noiseSuppression=!!value;const track=this.capture[0]?.stream.getAudioTracks()[0];
+    if(!track)return {requested:!!value,actual:null};
+    try{await track.applyConstraints({noiseSuppression:!!value,autoGainControl:false});}catch{}
+    const actual=track.getSettings().noiseSuppression;
+    return {requested:!!value,actual:typeof actual==='boolean'?actual:null};
+  }
   notify(joined){
     if(!this.context||!this.noticeGain)return;const start=this.context.currentTime;
     for(const [n,frequency] of [660,joined?880:440].entries()){const oscillator=this.context.createOscillator(),gain=this.context.createGain(),at=start+n*.09;oscillator.frequency.value=frequency;gain.gain.setValueAtTime(0,at);gain.gain.linearRampToValueAtTime(.055,at+.01);gain.gain.linearRampToValueAtTime(0,at+.09);oscillator.connect(gain).connect(this.noticeGain);oscillator.start(at);oscillator.stop(at+.09);oscillator.onended=()=>{oscillator.disconnect();gain.disconnect();};}
@@ -25,7 +33,7 @@ export class BrowserAudio{
   async inputs(){return (await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audioinput'&&d.deviceId!=='communications');}
   async microphone(enabled,deviceId=''){
     this.stopCapture(0);if(!enabled){this.options.microphone=false;return;}
-    const epoch=++this.micEpoch;const stream=await navigator.mediaDevices.getUserMedia({audio:{...(deviceId?{deviceId:{exact:deviceId}}:{}),echoCancellation:true,noiseSuppression:true,autoGainControl:false,channelCount:1},video:false});
+    const epoch=++this.micEpoch;const stream=await navigator.mediaDevices.getUserMedia({audio:{...(deviceId?{deviceId:{exact:deviceId}}:{}),echoCancellation:true,noiseSuppression:this.options.noiseSuppression!==false,autoGainControl:false,channelCount:1},video:false});
     if(epoch!==this.micEpoch||!this.context){stream.getTracks().forEach(t=>t.stop());return;}
     if(stream.getAudioTracks().some(t=>/cable|voicemeeter|stereo mix|立体声混音/i.test(t.label))){stream.getTracks().forEach(t=>t.stop());throw new Error('选到了虚拟输入，请选择真实麦克风');}
     this.options.microphone=true;await this.addCapture(0,stream,epoch);this.updateGate();
@@ -47,11 +55,11 @@ export class BrowserAudio{
     if(!valid()){cancel();return;}await this.context.resume();if(!valid()){cancel();return;}const source=this.context.createMediaStreamSource(stream),node=new AudioWorkletNode(this.context,'voicebridge-room-capture',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[channels],channelCount:channels,channelCountMode:'explicit',processorOptions:{channels}});
     const pending=new Map();let timestamp=0;const encoder=new AudioEncoder({output:chunk=>{const frameEpoch=pending.get(chunk.timestamp);pending.delete(chunk.timestamp);if(frameEpoch!==(kind?this.shareEpoch:this.micEpoch)||!this.capture[kind]||kind===0&&!this.gate())return;const opus=new Uint8Array(chunk.byteLength);chunk.copyTo(opus);this.send(kind,opus,frameEpoch);},error:()=>this.status('发送编码失败，请关闭后重新开启')});encoder.configure(config);
     this.capture[kind]={stream,source,node,encoder,pending};node.port.onmessage=({data})=>{if(data.epoch!==(kind?this.shareEpoch:this.micEpoch)||!this.capture[kind]||encoder.encodeQueueSize>4)return;const audio=new AudioData({format:'f32',sampleRate:48000,numberOfFrames:960,numberOfChannels:channels,timestamp,data:data.pcm});pending.set(timestamp,data.epoch);timestamp+=20000;encoder.encode(audio);audio.close();};
-    source.connect(node).connect(this.context.destination);node.port.postMessage({enabled:kind===1||this.gate(),gain:kind?(this.options.musicGain??100)/100:this.options.microphoneGain/100,epoch});
+    source.connect(node).connect(this.context.destination);node.port.postMessage({enabled:this.networkConnected&&(kind===1||this.gate()),gain:kind?(this.options.musicGain??100)/100:this.options.microphoneGain/100,epoch});
     for(const track of stream.getAudioTracks())track.onended=()=>{this.stopCapture(kind);this.status(kind?'共享已停止':'麦克风已断开');};
     }catch(error){cancel();this.stopCapture(kind);throw error;}
   }
-  gate(){return this.options.microphone&&(this.options.talkMode==='free'||this.pressed);}
+  gate(){return this.networkConnected&&this.options.microphone&&(this.options.talkMode==='free'||this.pressed);}
   keyDown(code){if(code===this.options.talkKey&&!this.pressed){this.pressed=true;this.micEpoch++;this.updateGate();}}
   keyUp(){if(this.pressed){this.pressed=false;this.micEpoch++;this.updateGate();}}
   updateGate(){const capture=this.capture[0];if(capture)capture.node.port.postMessage({enabled:this.gate(),gain:this.options.microphoneGain/100,epoch:this.micEpoch});}
