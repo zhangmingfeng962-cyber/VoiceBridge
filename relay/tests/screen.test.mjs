@@ -85,3 +85,15 @@ test('TURN REST credentials are temporary, member scoped, HMAC authenticated and
   assert.equal(JSON.stringify(result).includes(config.secret),false);assert.equal(screenIce(screenConfiguration({}),'room','member').relayAvailable,false);
   assert.throws(()=>screenConfiguration({TURN_URLS:'turn:example.com:3478'}));assert.throws(()=>screenConfiguration({TURN_URLS:'https://evil.example',TURN_SHARED_SECRET:'a'.repeat(40)}));
 });
+
+test('direct viewers do not consume the relay budget and two relay legs count twice',async()=>{
+ const ctx=await setup();try{
+  const r=await room(ctx.service),a=await join(ctx,r),b=await join(ctx,r),c=await join(ctx,r),session=await claim(a);
+  b.send({type:'screen:watch',session});const bl=(await b.next(m=>m.type==='screen:watching')).link;c.send({type:'screen:watch',session});const cl=(await c.next(m=>m.type==='screen:watching')).link;
+  a.send({type:'screen:route',session,link:bl,to:b.id,relay:false,relayHops:0});await a.next(m=>m.type==='screen:state'&&m.budgets?.[b.id]===4500000);
+  assert.equal(ctx.service.screens.state(r.id).budgets[c.id],2000000);
+  a.send({type:'screen:route',session,link:cl,to:c.id,relay:true,relayHops:1});await a.next(m=>m.type==='screen:state'&&m.budgets?.[c.id]===4000000);
+  a.send({type:'screen:route',session,link:cl,to:c.id,relay:true,relayHops:2});await a.next(m=>m.type==='screen:state'&&m.budgets?.[c.id]===2000000);
+  c.send({type:'screen:route',session,link:bl,to:b.id,relay:false});assert.equal((await c.next(m=>m.type==='screen:error')).code,'forbidden');
+ }finally{await ctx.close();}
+});

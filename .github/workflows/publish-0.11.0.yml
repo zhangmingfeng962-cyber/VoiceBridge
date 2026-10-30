@@ -1,0 +1,68 @@
+name: Publish VoiceBridge 0.11.0
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/publish-0.11.0.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.426'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.3'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate and publish single Windows executable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $PSNativeCommandUseErrorActionPreference=$true
+          if((Get-FileHash src/VoiceBridge.App/Native/voicebridge-rnnoise.dll -Algorithm SHA256).Hash.ToLowerInvariant() -ne '8bcf99aee95f01ab6b6f073304dfc0e25e416b254b6ea2f0cd5faa7630b41a02'){throw 'Native library integrity mismatch'}
+          Push-Location relay
+          npm ci --ignore-scripts
+          npm test
+          Pop-Location
+          dotnet restore VoiceBridge.sln --locked-mode
+          dotnet test VoiceBridge.sln -c Release --no-restore --nologo
+          dotnet publish src/VoiceBridge.App/VoiceBridge.App.csproj -c Release -r win-x64 --self-contained true --no-restore -o artifacts/win-x64
+          $report=Join-Path $PWD 'artifacts/single-file-report.json'
+          $child=Start-Process -FilePath (Join-Path $PWD 'artifacts/win-x64/VoiceBridge.exe') -ArgumentList @('--self-test',$report) -PassThru -WindowStyle Hidden
+          if(!$child.WaitForExit(25000) -or $child.ExitCode -ne 0){throw 'Single EXE diagnostic failed'}
+          $result=Get-Content $report -Raw | ConvertFrom-Json
+          if($result.NoiseSuppression -ne 'RNNoise 0.2 loaded' -or !$result.NoiseOutputFinite){throw 'Bundled noise component failed'}
+          & scripts/Package-Preview.ps1 -ExecutablePath artifacts/win-x64/VoiceBridge.exe -OutputDirectory artifacts/release
+      - name: Publish verified release and domestic transfer manifest
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $PSNativeCommandUseErrorActionPreference=$true
+          $health=Invoke-RestMethod 'https://voicebridge-room.cn/health' -TimeoutSec 15
+          if($health.release -ne '0.11.0' -or !$health.resume){throw 'Domestic relay upgrade must be complete before publishing'}
+          $notes=@'
+          网站：[voicebridge-room.cn](https://voicebridge-room.cn/)。下载 EXE 即可创建房间，无需导入配置或自建服务器。
+
+          - 活跃房间不限时，房主离开不散房；全员离开 30 分钟后释放。
+          - 自动保存昵称，网络异常保留身份 90 秒并重连。
+          - 独立麦克风降噪开关；人声与音乐分开处理，保留音量与按键说话。
+          - 网页以语音和音乐为主，屏幕共享改为小卡片；目标 1080p／最高60帧，显示实际画质。
+          - ICE 续期保留现有视频连接，区分直连和中继预算，并计入双段中继流量。
+
+          EXE、完整源码和 SHA256 校验文件由本标签源码在 GitHub Windows runner 构建。测试范围、长测结果与限制见 docs/VERIFICATION-0.11.0.md。合成端点测试不能替代两台独立电脑的真人音质和延迟验收；现有带宽不能保证多人均达到 1080p60。
+          '@
+          [IO.File]::WriteAllText((Join-Path $PWD 'artifacts/release-notes.md'),$notes,[Text.UTF8Encoding]::new($false))
+          gh release create v0.11.0 --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --title 'VoiceBridge 0.11.0 · 一起听，自在聊' --notes-file artifacts/release-notes.md --latest artifacts/release/VoiceBridge-v0.11.0.exe artifacts/release/VoiceBridge-v0.11.0-source.zip artifacts/release/SHA256SUMS.txt
+          python scripts/Upload-ClientChunks.py 0.11.0 artifacts/release/VoiceBridge-v0.11.0.exe
+          Get-Content artifacts/release/SHA256SUMS.txt | Add-Content $env:GITHUB_STEP_SUMMARY

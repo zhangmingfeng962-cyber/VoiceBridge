@@ -31,6 +31,7 @@ el('run').onclick=async()=>{
     const config=await fetch('/__fixture/config').then(r=>r.json()),a=await member(config,0),b=await member(config,1),c=await member(config,2);
     await a.screen.select();await wait(async()=>await frames(b)>4&&await frames(c)>4,'two real WebRTC viewers');
     record('同一共享画面传给两位真实 WebRTC 观看者');
+    if(config.turnTransport){for(const client of [b,c])for(const link of client.screen.links.values()){const stats=await link.pc.getStats(),values=[...stats.values()],transport=values.find(x=>x.type==='transport'&&x.selectedCandidatePairId),pair=stats.get(transport?.selectedCandidatePairId)||values.find(x=>x.type==='candidate-pair'&&x.nominated&&x.state==='succeeded');if(!pair||stats.get(pair.localCandidateId)?.candidateType!=='relay'||stats.get(pair.remoteCandidateId)?.candidateType!=='relay')throw Error('Expected selected relay candidates at both endpoints');}record('两位观看者均使用实际选中的杭州中继候选');}
     const first=sample(b.video);if(!(first[1]>first[2]))throw Error('Unexpected first source pixels');record('观看端收到来源 A 的真实视频像素');
     await a.screen.pause(true);await wait(()=>b.state.paused&&c.state.paused,'pause state');
     if([...a.screen.links.values()].some(item=>item.sender.track!==null))throw Error('Live video sender remained while paused');
