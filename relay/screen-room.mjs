@@ -33,9 +33,9 @@ export class ScreenRooms{
     const share=this.shares.get(room);
     if(!share)return {type:'screen:state',owner:null};
     const client=this.clients.get(share.owner);
-    let relayCount=0;for(const item of this.shares.values())for(const viewer of item.viewers.keys())if(item.routes.get(viewer)!=='direct')relayCount++;
+    let relayCount=0;for(const item of this.shares.values())for(const viewer of item.viewers.keys())relayCount+=item.routes.get(viewer)??2;
     const relayBudget=Math.max(32000,Math.floor(this.config.budget*.8/Math.max(1,relayCount))),budgets={};
-    for(const viewer of share.viewers.keys())budgets[viewer]=share.routes.get(viewer)==='direct'?4500000:relayBudget;
+    for(const viewer of share.viewers.keys())budgets[viewer]=share.routes.get(viewer)===0?4500000:relayBudget;
     return {type:'screen:state',owner:share.owner,name:client?.peer.name||'成员',connected:!client?.suspended,session:share.session,paused:share.paused,mode:share.mode,surface:share.surface,viewers:[...share.viewers.keys()],budgets,maxBitrate:Math.min(4500000,...Object.values(budgets))};
   }
   notify(room){const message=this.state(room);for(const client of this.clients.values())if(client.peer.room===room)this.emit(client,message);}
@@ -84,7 +84,8 @@ export class ScreenRooms{
     if(message.type==='screen:route'){
       const owner=peer.id===share.owner,viewer=owner?message.to:peer.id,target=this.clients.get(message.to);
       if(typeof message.relay!=='boolean'||!target||target.peer.room!==room||!share.viewers.has(viewer)||(!owner&&message.to!==share.owner)||share.viewers.get(viewer)!==message.link){reject('forbidden');return;}
-      share.routes.set(viewer,message.relay?'relay':'direct');this.notifyAll();return;
+      const hops=message.relay?([1,2].includes(message.relayHops)?message.relayHops:2):0;
+      share.routes.set(viewer,hops);this.notifyAll();return;
     }
     if(message.type==='screen:refresh'){
       if(peer.id===share.owner||message.to!==share.owner||share.viewers.get(peer.id)!==message.link){reject('forbidden');return;}

@@ -38,7 +38,7 @@ export class ScreenView{
   status(message){this.message=message;byId('screenStatus').textContent=message;}
   metrics(metric){
     if(!this.state.owner)return;
-    const resolution=metric.width?` · ${metric.width} × ${metric.height}${metric.fps?' / '+metric.fps+' 帧':''}`:'';
+    const resolution=metric.width?` · ${metric.width} × ${metric.height} / ${metric.fps} 帧`:'';
     const limited=metric.limited==='cpu'?' · 设备编码负载偏高':metric.limited==='bandwidth'||metric.targetFps&&metric.targetFps<60?' · 当前帧率受网络或档位限制':'';
     byId('screenNetwork').textContent=(metric.owner?'发送':'接收')+' · '+(metric.relay?'服务器中继':'直连')+(metric.rttMs?' · 往返 '+metric.rttMs+' ms':'')+resolution+(metric.owner&&metric.bitrate?' · '+Math.round(metric.bitrate/1000)+' kbps':'')+limited;
   }

@@ -19,11 +19,11 @@ public sealed class RoomClient : IAsyncDisposable
     private readonly Channel<(byte[] Data, long Time)>[] audio = [
         Channel.CreateBounded<(byte[], long)>(new BoundedChannelOptions(6) { FullMode = BoundedChannelFullMode.DropOldest }),
         Channel.CreateBounded<(byte[], long)>(new BoundedChannelOptions(6) { FullMode = BoundedChannelFullMode.DropOldest })];
-    private readonly Channel<(string? Connection, JsonElement Command)> commands = Channel.CreateBounded<(string?, JsonElement)>(new BoundedChannelOptions(16) { FullMode = BoundedChannelFullMode.DropOldest });
     private readonly Channel<byte> wake = Channel.CreateBounded<byte>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
     private readonly uint[] sequences = [0, 0];
-    private readonly ProfileStore profile = new();
-    private Task? sessionLoop, commandLoop, stateLoop;
+    private readonly ProfileStore profile;
+    private readonly Func<DesktopAudio, Task> startAudio;
+    private Task? sessionLoop, stateLoop;
     private string? writer, connectionId, resumeToken;
     private RoomCipher? cipher;
     private long stateSequence, controlSequence = -1, appliedRevision;
@@ -43,7 +43,8 @@ public sealed class RoomClient : IAsyncDisposable
     public bool Connected => networkReady && socket?.State == WebSocketState.Open && !stop.IsCancellationRequested;
     public bool SessionActive => running && !disposed && !stop.IsCancellationRequested;
     public event Action? Changed;
-    public RoomClient() => Audio = new(PublishAudio);
+    public RoomClient(ProfileStore? profileStore = null, Func<DesktopAudio, Task>? audioStart = null)
+    { profile = profileStore ?? new(); startAudio = audioStart ?? (engine => engine.StartAsync()); Audio = new(PublishAudio); }
     public async Task CreateAsync(string name)
     {
         string origin = RoomService.DefaultOrigin;
@@ -63,9 +64,9 @@ public sealed class RoomClient : IAsyncDisposable
         Invite = invite; Name = ProfileSettings.CleanName(name); if (Name.Length == 0) Name = "朋友";
         profile.Save(profile.Read() with { Nickname = Name });
         cipher = new(invite.Key, invite.RoomId); Status = "正在连接音乐房间…"; running = true;
-        commandLoop = Task.Run(CommandLoopAsync); sessionLoop = Task.Run(SessionLoopAsync);
+        sessionLoop = Task.Run(SessionLoopAsync);
         await joined.Task.WaitAsync(TimeSpan.FromSeconds(20), stop.Token);
-        await Audio.StartAsync(); Audio.SetNetworkConnected(Connected); SendFlags();
+        await startAudio(Audio); Audio.SetNetworkConnected(Connected); SendFlags();
         stateLoop = Task.Run(StateLoopAsync); Status = "已连接 · 打开网页控制房间"; Changed?.Invoke();
     }
     private void Queue(object value)
@@ -96,7 +97,10 @@ public sealed class RoomClient : IAsyncDisposable
                 socket = transport; transport.Options.SetRequestHeader("Origin", Invite.Origin); transport.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
                 try
                 {
-                    await transport.ConnectAsync(new Uri(Invite.Origin.Replace("https:", "wss:", StringComparison.Ordinal) + $"/api/rooms/{Invite.RoomId}/voice"), sessionStop.Token).WaitAsync(TimeSpan.FromSeconds(12), stop.Token);
+                    var originUri = new Uri(Invite.Origin);
+                    if (originUri.Scheme != "https" && !originUri.IsLoopback) throw new InvalidOperationException("房间必须使用 HTTPS");
+                    string wsOrigin = Invite.Origin.Replace("https:", "wss:", StringComparison.Ordinal).Replace("http:", "ws:", StringComparison.Ordinal);
+                    await transport.ConnectAsync(new Uri(wsOrigin + $"/api/rooms/{Invite.RoomId}/voice"), sessionStop.Token).WaitAsync(TimeSpan.FromSeconds(12), stop.Token);
                     object request = MemberId.Length > 0 && resumeToken is not null
                         ? new { type = "join", version = 3, role = "desktop", token = Invite.Token, resume = new { memberId = MemberId, token = resumeToken } }
                         : new { type = "join", version = 3, role = "desktop", token = Invite.Token, name = Name, hostToken = writer, canResume = true };
@@ -228,11 +232,6 @@ public sealed class RoomClient : IAsyncDisposable
         }
         SendFlags(); Changed?.Invoke();
     }
-    private async Task CommandLoopAsync()
-    {
-        try { await foreach (var command in commands.Reader.ReadAllAsync(stop.Token)) await ApplyCommandAsync(command.Connection, command.Command); }
-        catch (OperationCanceledException) { }
-    }
     private async Task StateLoopAsync()
     {
         try
@@ -260,7 +259,7 @@ public sealed class RoomClient : IAsyncDisposable
         }
         catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or ObjectDisposedException) { }
         stop.Cancel(); socket?.Abort();
-        foreach (var task in new[] { sessionLoop, commandLoop, stateLoop }) if (task is not null) { try { await task; } catch (Exception) { } }
+        foreach (var task in new[] { sessionLoop, stateLoop }) if (task is not null) { try { await task; } catch (Exception) { } }
         await Audio.DisposeAsync(); stop.Dispose(); sendGate.Dispose();
     }
     private sealed class RoomDisconnected(int code) : IOException("Room connection closed (" + code + ")") { public int Code { get; } = code; }

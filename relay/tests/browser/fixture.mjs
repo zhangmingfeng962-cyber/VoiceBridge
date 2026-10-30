@@ -3,6 +3,7 @@ import WebSocket from '../../node_modules/ws/wrapper.mjs';
 import {RoomCrypto} from '../../web/crypto.js';
 import dgram from 'node:dgram';
 import {screenConfiguration} from '../../screen-room.mjs';
+import {turnIssuer} from './turn-issuer.mjs';
 // Real loopback STUN binding responses avoid dependence on local multicast DNS in this test environment.
 const stun=dgram.createSocket('udp4');stun.on('message',(request,remote)=>{if(request.length<20||request.readUInt16BE(0)!==1||request.readUInt32BE(4)!==0x2112a442)return;const response=Buffer.alloc(32);response.writeUInt16BE(0x101,0);response.writeUInt16BE(12,2);request.copy(response,4,4,20);response.writeUInt16BE(0x20,20);response.writeUInt16BE(8,22);response[25]=1;response.writeUInt16BE(remote.port^0x2112,26);const ip=remote.address.split('.').reduce((n,b)=>(n*256+Number(b))>>>0,0);response.writeUInt32BE((ip^0x2112a442)>>>0,28);stun.send(response,remote.port,remote.address);});
 await new Promise(resolve=>stun.bind(0,'127.0.0.1',resolve));
@@ -10,11 +11,22 @@ const source=fileURLToPath(new URL('../../',import.meta.url)),fixtures=fileURLTo
 fs.copyFileSync(path.join(source,'screen-room.mjs'),path.join(runtime,'screen-room.mjs'));
 fs.copyFileSync(path.join(source,'outbound.mjs'),path.join(runtime,'outbound.mjs'));
 for(const name of ['synthetic-capture.js','browser-test.js'])fs.copyFileSync(path.join(fixtures,name),path.join(runtime,'web',name));
+const transport=process.env.VB_TURN_TEST||'',approved=['turn:voicebridge-room.cn:3478?transport=udp','turn:voicebridge-room.cn:3478?transport=tcp','turns:voicebridge-room.cn:5349?transport=tcp'];
+if(transport&&!approved.includes(transport))throw Error('Unapproved TURN test transport');
+const issuer=transport?await turnIssuer(path.join(runtime,'turn-ice.json')):null;
+if(transport){
+ let script=fs.readFileSync(path.join(runtime,'web/browser-test.js'),'utf8');
+ script=script.replace('new RTCPeerConnection(configuration)','new RTCPeerConnection({...configuration,iceTransportPolicy:"relay"})').replace('socket.onmessage=event=>','socket.onmessage=async event=>');
+ script=script.replace("if(message.type.startsWith('screen:'))",`if(message.type==='screen:hello'){const temporary=await fetch('/__fixture/ice?index='+index).then(r=>r.json());message.iceServers=temporary.iceServers;message.expires=temporary.expires;message.relayAvailable=true;}if(message.type.startsWith('screen:'))`);
+ script=script.replace('turnTested:false','turnTested:true,turnTransport:'+JSON.stringify(transport));fs.writeFileSync(path.join(runtime,'web/browser-test.js'),script);
+}
 let code=fs.readFileSync(path.join(source,'server.mjs'),'utf8').replace("from 'ws'",'from '+JSON.stringify(pathToFileURL(path.join(source,'node_modules/ws/wrapper.mjs')).href));
 code=code.replace("'room.css']","'room.css','synthetic-capture.js','browser-test.js']");
 const marker="if(req.method==='GET'&&url.pathname==='/health')";
 if(!code.includes(marker))throw Error('Fixture route marker missing');
 code=code.replace(marker,`if(req.method==='GET'&&url.pathname==='/__fixture/config'){json(res,200,JSON.parse(await readFile(new URL('./fixture-config.json',import.meta.url),'utf8')));return;}
+if(req.method==='GET'&&url.pathname==='/__fixture/ice'){const value=JSON.parse(await readFile(new URL('./turn-ice.json',import.meta.url),'utf8')),index=Number(url.searchParams.get('index'));if(![0,1,2].includes(index))throw Error('Invalid test index');json(res,200,{expires:value.expires,iceServers:value.profiles[index].filter(x=>x.username).map(x=>({...x,urls:x.urls.filter(u=>u===${JSON.stringify(transport)})})).filter(x=>x.urls.length)});return;}
+if(req.method==='POST'&&url.pathname==='/__fixture/drop-controller'){for(const peer of peers.values())peer.controller?.terminate();json(res,200,{synthetic:true});return;}
 if(req.method==='POST'&&url.pathname==='/__fixture/report'){const pieces=[];let total=0;for await(const piece of req){total+=piece.length;if(total>65536)throw Error('Fixture report too large');pieces.push(piece);}const value=JSON.parse(Buffer.concat(pieces).toString());(await import('node:fs/promises')).writeFile(new URL('../browser-report.json',import.meta.url),JSON.stringify(value,null,2));json(res,200,{saved:true});return;}
 if(req.method==='GET'&&url.pathname==='/__screen-fixture'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});res.end(await readFile(new URL('./web/fixture.html',import.meta.url)));return;}
 ${marker}`);
@@ -24,7 +36,7 @@ fs.writeFileSync(path.join(runtime,'web/fixture.html'),`<!doctype html><html lan
 const {startServer}=await import(pathToFileURL(path.join(runtime,'server.mjs')));
 const service=await startServer({port:4091,host:'127.0.0.1',publicRooms:true,publishKeyHash:createHash('sha256').update('1'.repeat(64)).digest('hex'),screenConfig:screenConfiguration({STUN_URLS:'stun:127.0.0.1:'+stun.address().port})});
 const created=await(await fetch(service.url+'/api/rooms',{method:'POST',body:'{}'})).json(),root=randomBytes(32).toString('hex'),cipher=new RoomCrypto(created.id,root);
-fs.writeFileSync(path.join(runtime,'fixture-config.json'),JSON.stringify({id:created.id,listenToken:created.listenToken}));
+fs.writeFileSync(path.join(runtime,'fixture-config.json'),JSON.stringify({id:created.id,listenToken:created.listenToken,key:root,turnTransport:transport}));
 const socket=new WebSocket(service.url.replace('http:','ws:')+`/api/rooms/${created.id}/voice`,{origin:service.url});let member,control,connection,sequence=0,revision=0,attached=false,options={microphone:true,microphoneGain:100,speakerGain:0,talkMode:'free',talkKey:86,sharing:false,sourceId:'synthetic',musicGain:100,autoBuffer:true,memberVoice:{},memberMusic:{}};
 const send=message=>{if(socket.readyState===1)socket.send(JSON.stringify(message));};await once(socket,'open');send({type:'join',version:3,role:'desktop',token:created.listenToken,name:'合成验证主持人',hostToken:created.writeToken});
 socket.on('message',async(data,binary)=>{if(binary)return;const message=JSON.parse(data);
@@ -34,6 +46,6 @@ socket.on('message',async(data,binary)=>{if(binary)return;const message=JSON.par
   if(message.type==='control'&&message.connectionId===connection){const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:Buffer.from(message.iv,'base64'),additionalData:new TextEncoder().encode(`${created.id}|control|${member}|${connection}|${message.sequence}`)},await cipher.key(`VoiceBridge control v2|${member}|${connection}`),Buffer.from(message.data,'base64'));const command=JSON.parse(new TextDecoder().decode(plain));if(command.action==='configure'){options=command.options;revision=command.revision;send({type:'flags',microphone:options.microphone,music:options.sharing});}}
 });
 const timer=setInterval(async()=>{if(!connection||!member)return;const conn=connection,seq=sequence++,iv=crypto.getRandomValues(new Uint8Array(12)),value={options,noiseSuppressionAvailable:true,microphones:[{id:'synthetic',name:'合成输入 · 无真实麦克风'}],outputs:[{id:'synthetic',name:'合成静音输出'}],sources:[{id:'synthetic',name:'合成播放器',active:true}],status:'合成验证：无真实设备采集',streams:[],microphonePeak:0,speakerPeak:0,appliedRevision:revision};const encrypted=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:new TextEncoder().encode(`${created.id}|state|${member}|${conn}|${seq}`)},await cipher.key(`VoiceBridge state v2|${member}|${conn}`),new TextEncoder().encode(JSON.stringify(value)));send({type:'state',connectionId:conn,sequence:seq,iv:Buffer.from(iv).toString('base64'),data:Buffer.from(encrypted).toString('base64')});},500);
-let stopping=false;async function stop(){if(stopping)return;stopping=true;clearInterval(timer);clearTimeout(expire);socket.terminate();stun.close();await service.stop();}
+let stopping=false;async function stop(){if(stopping)return;stopping=true;clearInterval(timer);clearTimeout(expire);socket.terminate();stun.close();await service.stop();await issuer?.stop();}
 process.on('SIGINT',()=>void stop());process.on('SIGTERM',()=>void stop());const expire=setTimeout(()=>void stop(),1800000);
 console.log('Synthetic screen fixture ready at '+service.url+'/__screen-fixture');

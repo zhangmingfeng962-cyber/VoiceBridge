@@ -195,9 +195,10 @@ export class ScreenShare{
   async statistics(item){
     if(this.links.get(item.peer)!==item)return;
     try{
-      const reports=await item.pc.getStats();let rtt=0,loss=0,available=0,video,relay=false;
+      const reports=await item.pc.getStats();let rtt=0,loss=0,available=0,video,relay=false,relayHops=0;
+      const transports=[...reports.values()].filter(x=>x.type==='transport'&&x.selectedCandidatePairId),selected=transports.map(x=>reports.get(x.selectedCandidatePairId)).find(Boolean)||[...reports.values()].find(x=>x.type==='candidate-pair'&&x.state==='succeeded'&&x.nominated);
+      if(selected){rtt=selected.currentRoundTripTime||0;available=selected.availableOutgoingBitrate||0;relayHops=Number(reports.get(selected.localCandidateId)?.candidateType==='relay')+Number(reports.get(selected.remoteCandidateId)?.candidateType==='relay');relay=relayHops>0;}
       for(const stat of reports.values()){
-        if(stat.type==='candidate-pair'&&stat.state==='succeeded'&&stat.nominated){rtt=stat.currentRoundTripTime||0;available=stat.availableOutgoingBitrate||0;relay=reports.get(stat.localCandidateId)?.candidateType==='relay'||reports.get(stat.remoteCandidateId)?.candidateType==='relay';}
         if(stat.type==='remote-inbound-rtp'&&stat.kind==='video')loss=Math.max(loss,stat.fractionLost||0);
         if((stat.type==='inbound-rtp'||stat.type==='outbound-rtp')&&stat.kind==='video')video=stat;
       }
@@ -209,7 +210,7 @@ export class ScreenShare{
         else if(++item.stable>=6){item.factor=Math.min(1,item.factor+.08);item.stable=0;}
         await this.limit(item);
       }
-      if(item.route!==relay&&video){item.route=relay;this.send({type:'screen:route',session:item.session,link:item.link,to:item.peer,relay});}
+      if(item.route!==relayHops&&video&&selected){item.route=relayHops;this.send({type:'screen:route',session:item.session,link:item.link,to:item.peer,relay,relayHops});}
       this.onMetrics({peer:item.peer,owner:item.owner,rttMs:Math.round(rtt*1000),relay,bitrate:item.bitrate||0,width:video?.frameWidth||0,height:video?.frameHeight||0,fps:Math.round(video?.framesPerSecond||0),targetFps:item.targetFps,limited:video?.qualityLimitationReason||'',paused:!!this.state.paused});
     }catch{} // Closing a peer during getStats is a normal source-change/leave race.
   }
