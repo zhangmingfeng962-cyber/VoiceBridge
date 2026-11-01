@@ -1,0 +1,8 @@
+export async function getRooms(){const response=await fetch('/api/lobby/rooms',{cache:'no-store'});if(!response.ok)throw Error('大厅暂时无法刷新');return (await response.json()).rooms;}
+export async function publicAdmission(id){const response=await fetch('/api/lobby/rooms/'+id+'/join',{method:'POST',body:'{}',headers:{'Content-Type':'application/json'}});if(!response.ok)throw Error(response.status===409?'房间已满，请稍后重试':'房间已关闭或不再公开');return response.json();}
+export function publicLink(id){return location.origin+'/rooms/'+id;}
+export function renderRooms(container,rooms,onJoin){
+ container.replaceChildren();
+ if(!rooms.length){const empty=document.createElement('p');empty.className='emptyRoom';empty.textContent='还没有公开房间。创建一个房间，与朋友碰面。';container.append(empty);return;}
+ for(const room of rooms){const row=document.createElement('article');row.className='lobbyRow';const identity=document.createElement('div'),name=document.createElement('h2'),owner=document.createElement('p');name.textContent=room.name;owner.textContent='房主 '+(room.ownerName||'正在连接');owner.className='small';identity.append(name,owner);const count=document.createElement('span');count.className='roomCount';count.textContent=room.count+' / '+room.capacity+' 人';const buttons=document.createElement('div');buttons.className='buttons';const join=document.createElement('button');join.className='secondary';join.textContent=room.count>=room.capacity?'已满':'网页加入';join.disabled=room.count>=room.capacity;join.onclick=()=>onJoin(room.id);const desktop=document.createElement('a');desktop.className='desktopJoin';desktop.textContent='软件加入';desktop.href='voicebridge://join/'+room.id;buttons.append(join,desktop);row.append(identity,count,buttons);container.append(row);}
+}

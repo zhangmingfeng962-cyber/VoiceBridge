@@ -22,7 +22,7 @@ public sealed record AudioOptions
     public Dictionary<string, float> MemberVoice { get; init; } = new();
     public Dictionary<string, float> MemberMusic { get; init; } = new();
 }
-public sealed class DesktopAudio : IAsyncDisposable
+public sealed class DesktopAudio : IRoomAudio
 {
     private readonly SemaphoreSlim lifecycle = new(1);
     private readonly CancellationTokenSource stop = new();
@@ -39,12 +39,16 @@ public sealed class DesktopAudio : IAsyncDisposable
     private Task? monitor;
     private Thread? pump;
     private bool wasTalking;
+    private volatile bool microphoneFault, outputFault;
+    private long lastMicrophoneData, nextDeviceRecovery;
+    public bool MicrophoneReady => Volatile.Read(ref microphoneInput) is not null && !microphoneFault;
+    public bool OutputReady => output is not null && !outputFault;
     private long privacyEpoch, configuredEpoch;
     private string selectedOutput = "", selectedMicrophone = "";
     private bool disposed;
     private readonly object disposeGate = new();
     private Task? disposal;
-    public readonly RoomMix Mix = new();
+    public RoomMix Mix { get; } = new();
     public AudioOptions Options => Volatile.Read(ref options);
     public AudioInventory Inventory => Volatile.Read(ref inventory);
     public string Status { get; private set; } = "未开启麦克风或音乐共享";
@@ -60,7 +64,8 @@ public sealed class DesktopAudio : IAsyncDisposable
         monitor = Task.Run(MonitorAsync);
         pump = new Thread(Pump) { IsBackground = true, Name = "Room Opus transmit" }; pump.Start();
         // Listening starts with the room, but microphone opens on entry as requested; application capture remains off.
-        await ApplyAsync(new() { Microphone = true, NoiseSuppression = new ProfileStore().Read().NoiseSuppression });
+        var saved = new ProfileStore().Read();
+        await ApplyAsync(new() { Microphone = true, NoiseSuppression = saved.NoiseSuppression, MicrophoneGain = saved.MicrophoneGain, SpeakerGain = saved.SpeakerGain, MusicGain = saved.MusicGain, TalkMode = saved.TalkMode, TalkKey = saved.TalkKey, MicrophoneId = saved.MicrophoneId, OutputId = saved.OutputId });
     }
     public Task ApplyAsync(AudioOptions next) { long approval = Interlocked.Read(ref privacyEpoch); return Task.Run(() => ApplyCoreAsync(next, approval)); }
     private async Task ApplyCoreAsync(AudioOptions next, long approval)
@@ -76,20 +81,27 @@ public sealed class DesktopAudio : IAsyncDisposable
             foreach (var entry in next.MemberMusic.Take(8)) Mix.SetGain(entry.Key, 1, entry.Value);
             enumerator ??= new MMDeviceEnumerator();
             string outputId = next.OutputId.Length > 0 ? next.OutputId : Inventory.Outputs.FirstOrDefault()?.Id ?? "";
-            if (output is null || outputId != selectedOutput)
+            string? outputError = null;
+            try
             {
-                output?.Stop(); output?.Dispose(); outputDevice?.Dispose(); output = null;
+            if (output is null || outputFault || outputId != selectedOutput)
+            {
+                var oldOutput = output; output = null; oldOutput?.Stop(); oldOutput?.Dispose(); outputDevice?.Dispose(); outputFault = false;
                 if (outputId.Length == 0) throw new InvalidOperationException("未找到耳机或扬声器，请连接正常听音设备。");
                 outputDevice = enumerator.GetDevice(outputId);
                 if (!AudioSources.SafeDevice(outputDevice.FriendlyName)) throw new InvalidOperationException("请选真实耳机或扬声器，不能将房间播放送到虚拟线缆。");
-                output = new WasapiOut(outputDevice, AudioClientShareMode.Shared, true, 20); output.Init(new SampleAdapter(Mix).ToWaveProvider()); output.Play(); selectedOutput = outputId;
+                var configured = new WasapiOut(outputDevice, AudioClientShareMode.Shared, true, 20); output = configured;
+                configured.PlaybackStopped += (_, data) => { if (ReferenceEquals(output, configured)) { outputFault = true; if (data.Exception is not null) Status = "听音设备暂不可用，正在恢复"; } };
+                output.Init(new SampleAdapter(Mix).ToWaveProvider()); output.Play(); selectedOutput = outputId;
             }
+            }
+            catch (Exception ex) { outputFault = true; outputError = "听音设备暂不可用：" + ex.GetBaseException().Message; }
             if (approval != Interlocked.Read(ref privacyEpoch)) next = next with { Microphone = false };
             string micId = next.MicrophoneId.Length > 0 ? next.MicrophoneId : Inventory.Microphones.FirstOrDefault()?.Id ?? "";
             string? microphoneError = null;
             try
             {
-                if (!next.Microphone || micId != selectedMicrophone)
+                if (!next.Microphone || microphoneInput is null || microphoneFault || micId != selectedMicrophone)
                 {
                     StopMicrophone();
                     if (next.Microphone)
@@ -98,13 +110,14 @@ public sealed class DesktopAudio : IAsyncDisposable
                         microphoneDevice = enumerator.GetDevice(micId);
                         if (!AudioSources.SafeDevice(microphoneDevice.FriendlyName)) throw new InvalidOperationException("请选择真实麦克风，不能使用虚拟线缆或立体声混音。");
                         microphone = new WasapiCapture(microphoneDevice, true, 10); var input = new CaptureInput(microphone.WaveFormat); Volatile.Write(ref microphoneInput, input);
-                        microphone.DataAvailable += (_, data) => input.Add(data.Buffer, data.BytesRecorded);
-                        microphone.RecordingStopped += (_, data) => { if (data.Exception is not null) Status = "麦克风中断：" + data.Exception.Message; };
+                        var configured = microphone; microphoneFault = false; Interlocked.Exchange(ref lastMicrophoneData, Environment.TickCount64);
+                        microphone.DataAvailable += (_, data) => { if (ReferenceEquals(Volatile.Read(ref microphoneInput), input)) { input.Add(data.Buffer, data.BytesRecorded); Interlocked.Exchange(ref lastMicrophoneData, Environment.TickCount64); } };
+                        microphone.RecordingStopped += (_, data) => { if (ReferenceEquals(microphone, configured)) { microphoneFault = true; Status = "麦克风暂不可用，正在恢复"; } };
                         microphone.StartRecording(); selectedMicrophone = micId;
                     }
                 }
             }
-            catch (Exception ex) { StopMicrophone(); next = next with { Microphone = false }; microphoneError = "麦克风未开启：" + ex.GetBaseException().Message; }
+            catch (Exception ex) { StopMicrophone(); microphoneFault = true; microphoneError = "麦克风未开启：" + ex.GetBaseException().Message; }
             Interlocked.Exchange(ref configuredEpoch, approval);
             if (approval != Interlocked.Read(ref privacyEpoch)) { StopMicrophone(); next = next with { Microphone = false }; }
             Volatile.Write(ref options, next with { OutputId = outputId, MicrophoneId = micId });
@@ -114,11 +127,11 @@ public sealed class DesktopAudio : IAsyncDisposable
                 await SyncSourcesAsync(next);
             }
             catch (Exception ex) { await StopSourcesAsync(); Volatile.Write(ref options, Options with { Sharing = false }); Status = "音乐未共享：" + ex.GetBaseException().Message; return; }
-            Status = microphoneError ?? (next.Sharing ? "正在共享所选程序 · 房间声音由客户端独立播放" : "已连接房间 · 音乐共享关闭");
+            Status = microphoneError ?? outputError ?? (next.Sharing ? "音乐共享中" : "语音已连接");
         }
         catch (Exception ex)
         {
-            StopMicrophone(); Volatile.Write(ref options, next with { Microphone = false, Sharing = false }); await StopSourcesAsync(); Status = ex.GetBaseException().Message;
+            Status = ex.GetBaseException().Message;
         }
         finally { lifecycle.Release(); }
     }
@@ -160,6 +173,8 @@ public sealed class DesktopAudio : IAsyncDisposable
                 await lifecycle.WaitAsync(stop.Token);
                 try { await SyncSourcesAsync(Options); } catch (Exception ex) { Status = "来源暂不可用：" + ex.GetBaseException().Message; }
                 finally { lifecycle.Release(); }
+                if (Environment.TickCount64 >= nextDeviceRecovery && (outputFault || output is null || Options.Microphone && (!MicrophoneReady || Environment.TickCount64 - Interlocked.Read(ref lastMicrophoneData) > 3000)))
+                { nextDeviceRecovery = Environment.TickCount64 + 5000; if (Options.Microphone && Environment.TickCount64 - Interlocked.Read(ref lastMicrophoneData) > 3000) microphoneFault = true; await ApplyAsync(Options); }
             }
         }
         catch (OperationCanceledException) { }
@@ -167,6 +182,7 @@ public sealed class DesktopAudio : IAsyncDisposable
     }
     private void Pump()
     {
+        using var audioScheduling = new AudioThread();
         using var voiceEncoder = new RoomEncoder(false); using var musicEncoder = new RoomEncoder(true);
         MicrophoneDenoiser? denoiser = null; bool denoiseFailed = false, pttReleased = true; int epoch = networkEpoch;
         var clock = Stopwatch.StartNew(); double next = 20; float[] stereo = new float[1920], mono = new float[960];

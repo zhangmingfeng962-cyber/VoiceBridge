@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 
 namespace VoiceBridge.Core;
-public sealed record RoomInvite(string Origin, string RoomId, string Token, byte[] Key)
+public sealed record RoomInvite(string Origin, string RoomId, string Token, byte[] Key, bool Public = false)
 {
     public static RoomInvite Parse(string value)
     {
@@ -14,8 +14,8 @@ public sealed record RoomInvite(string Origin, string RoomId, string Token, byte
         if (path.Length != 2 || path[0] != "room" || !RoomCipher.IsHex(path[1], 32) || parts.Length < 2 || !RoomCipher.IsHex(parts[0], 64) || !RoomCipher.IsHex(parts[1], 64)) throw new ArgumentException("邀请缺少房间编号或密钥，请重新复制完整链接。");
         return new(uri.GetLeftPart(UriPartial.Authority), path[1], parts[0], Convert.FromHexString(parts[1]));
     }
-    public string Link => $"{Origin}/room/{RoomId}#{Token}.{Convert.ToHexString(Key).ToLowerInvariant()}";
-    public string ControllerLink(string memberId, string secret) => Link + $".desktop.{memberId}.{secret}";
+    public string Link => Public ? $"{Origin}/rooms/{RoomId}" : $"{Origin}/room/{RoomId}#{Token}.{Convert.ToHexString(Key).ToLowerInvariant()}";
+    public string ControllerLink(string memberId, string secret) => $"{Origin}/room/{RoomId}#{Token}.{Convert.ToHexString(Key).ToLowerInvariant()}.desktop.{memberId}.{secret}";
 }
 public sealed class RoomCipher(byte[] rootKey, string roomId)
 {

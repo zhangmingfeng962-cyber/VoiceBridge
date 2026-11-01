@@ -11,6 +11,32 @@ namespace VoiceBridge.Tests;
 public class ReconnectionTests
 {
     [Fact]
+    public async Task ControllerLossAndStaleCommandsCannotResetNativeMicrophoneChoice()
+    {
+        string? root=AppContext.BaseDirectory;while(root is not null&&!File.Exists(Path.Combine(root,"VoiceBridge.sln")))root=Path.GetDirectoryName(root);Assert.NotNull(root);
+        var start=new ProcessStartInfo("node"){WorkingDirectory=root,UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true};start.ArgumentList.Add("relay/tests/native-fixture.mjs");using var server=Process.Start(start)!;
+        string directory=Path.Combine(Path.GetTempPath(),"VoiceBridge-owned-"+Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var details=JsonDocument.Parse((await server.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15)))!);string origin=details.RootElement.GetProperty("origin").GetString()!;
+            using var http=new HttpClient{BaseAddress=new Uri(origin)};http.DefaultRequestHeaders.Authorization=new("Bearer",new string('1',64));using var response=await http.PostAsync("/api/rooms",new StringContent("{}"));response.EnsureSuccessStatusCode();using var created=JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            string id=created.RootElement.GetProperty("id").GetString()!,token=created.RootElement.GetProperty("listenToken").GetString()!;byte[] key=RandomNumberGenerator.GetBytes(32);
+            await using var client=new RoomClient(new ProfileStore(Path.Combine(directory,"preferences.json")),audioFactory:publish=>new VoiceBridge.App.Audio.SyntheticRoomAudio(publish));await client.JoinAsync(new(origin,id,token,key),"原生连麦");
+            using var controller=new ClientWebSocket();controller.Options.SetRequestHeader("Origin",origin);await controller.ConnectAsync(new Uri(origin.Replace("http:","ws:")+$"/api/rooms/{id}/voice"),CancellationToken.None);
+            await Send(new{type="join",version=3,role="controller",memberId=client.MemberId,controlToken=client.ControlToken});
+            byte[] bytes=new byte[96000];string? connection=null;using var deadline=new CancellationTokenSource(10000);
+            while(connection is null){var read=await controller.ReceiveAsync(bytes.AsMemory(),deadline.Token);using var message=JsonDocument.Parse(bytes.AsMemory(0,read.Count));if(message.RootElement.GetProperty("type").GetString()=="welcome")connection=message.RootElement.GetProperty("connectionId").GetString();}
+            Assert.True(client.Audio.Options.Microphone);var old=client.Audio.Options;long previous=client.ConfigurationRevision;
+            await client.UpdateOptionsAsync(old with{Microphone=false});Assert.False(client.Audio.Options.Microphone);
+            var cipher=new RoomCipher(key,id);await Send(cipher.SealControl(client.MemberId,connection!,0,new{action="configure",revision=1,baseRevision=previous,options=old},false));
+            await WaitFor(()=>client.ControlNotice.Length>0);Assert.False(client.Audio.Options.Microphone);
+            controller.Abort();await Task.Delay(150);Assert.False(client.Audio.Options.Microphone);
+            await client.UpdateOptionsAsync(old);Assert.True(client.Audio.Options.Microphone);await Task.Delay(150);Assert.True(client.Audio.Options.Microphone);
+            async Task Send(object value)=>await controller.SendAsync(JsonSerializer.SerializeToUtf8Bytes(value,RoomCipher.JsonOptions).AsMemory(),WebSocketMessageType.Text,true,CancellationToken.None);
+        }
+        finally{if(!server.HasExited){await server.StandardInput.WriteLineAsync("stop");try{await server.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));}catch(TimeoutException){server.Kill(true);}}if(Directory.Exists(directory))Directory.Delete(directory,true);}
+    }
+    [Fact]
     public async Task NativeClientResumesSameMemberWithoutOpeningAudioDevicesAndExitLeavesFriendsConnected()
     {
         string? root = AppContext.BaseDirectory;

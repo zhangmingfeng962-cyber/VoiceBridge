@@ -1,0 +1,53 @@
+name: Validate VoiceBridge 0.12.0 candidate
+on:
+  push:
+    branches: [voicebridge-0.12.0]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.403'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.3'
+      - name: Validate source and bundled native component
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $PSNativeCommandUseErrorActionPreference=$true
+          if((Get-FileHash src/VoiceBridge.App/Native/voicebridge-rnnoise.dll -Algorithm SHA256).Hash.ToLowerInvariant() -ne '8bcf99aee95f01ab6b6f073304dfc0e25e416b254b6ea2f0cd5faa7630b41a02'){throw 'Native dependency integrity mismatch'}
+          Push-Location relay
+          npm ci --ignore-scripts
+          npm test
+          Pop-Location
+          dotnet restore VoiceBridge.sln --locked-mode
+          dotnet test VoiceBridge.sln -c Release --no-restore --nologo
+          & scripts/Build-Installer.ps1 -OutputDirectory artifacts/installer
+          $report=Join-Path $PWD 'artifacts/native-report.json'
+          $child=Start-Process -FilePath (Join-Path $PWD 'artifacts/install-app/VoiceBridge.exe') -ArgumentList @('--self-test',$report) -PassThru -WindowStyle Hidden
+          if(!$child.WaitForExit(25000) -or $child.ExitCode -ne 0){throw 'Bundled executable diagnostic failed'}
+          $result=Get-Content $report -Raw|ConvertFrom-Json
+          if(!$result.NoiseOutputFinite){throw 'Bundled RNNoise diagnostic failed'}
+          & scripts/Package-Preview.ps1 -OutputDirectory artifacts/source
+          node scripts/Build-OfflineRelay.mjs artifacts/offline-relay
+          Get-ChildItem artifacts/installer -File | Get-FileHash -Algorithm SHA256 | Format-Table | Out-File artifacts/installer-hashes.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VoiceBridge-0.12.0-candidate
+          compression-level: 0
+          path: |
+            artifacts/installer/*Setup.exe
+            artifacts/installer/*.nupkg
+            artifacts/installer/releases.win-x64.json
+            artifacts/installer-hashes.txt
+            artifacts/source/*.zip
+            artifacts/source/SHA256SUMS.txt
+            artifacts/native-report.json
+            artifacts/offline-relay/*

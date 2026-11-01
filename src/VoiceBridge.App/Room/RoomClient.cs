@@ -15,6 +15,7 @@ public sealed class RoomClient : IAsyncDisposable
     private ClientWebSocket? socket;
     private readonly CancellationTokenSource stop = new();
     private readonly SemaphoreSlim sendGate = new(1);
+    private readonly SemaphoreSlim configurationGate = new(1);
     private readonly Channel<byte[]> controls = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(16) { FullMode = BoundedChannelFullMode.DropOldest });
     private readonly Channel<(byte[] Data, long Time)>[] audio = [
         Channel.CreateBounded<(byte[], long)>(new BoundedChannelOptions(6) { FullMode = BoundedChannelFullMode.DropOldest }),
@@ -22,14 +23,14 @@ public sealed class RoomClient : IAsyncDisposable
     private readonly Channel<byte> wake = Channel.CreateBounded<byte>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
     private readonly uint[] sequences = [0, 0];
     private readonly ProfileStore profile;
-    private readonly Func<DesktopAudio, Task> startAudio;
+    private readonly Func<IRoomAudio, Task> startAudio;
     private Task? sessionLoop, stateLoop;
     private string? writer, connectionId, resumeToken;
     private RoomCipher? cipher;
-    private long stateSequence, controlSequence = -1, appliedRevision;
+    private long stateSequence, controlSequence = -1, appliedRevision, configurationRevision, lastReceived, lastPing, lastPong;
     private readonly TaskCompletionSource joined = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private JsonElement members = JsonSerializer.SerializeToElement(Array.Empty<object>());
-    private bool disposed, seenRoster, hadController;
+    private bool disposed, seenRoster;
     private volatile bool networkReady, running;
     private readonly object disposeGate = new();
     private Task? disposal;
@@ -38,37 +39,55 @@ public sealed class RoomClient : IAsyncDisposable
     public string Name { get; private set; } = "朋友";
     public string ControlToken { get; private set; } = "";
     public string ControllerLink => Invite.ControllerLink(MemberId, ControlToken);
-    public DesktopAudio Audio { get; }
+    public IRoomAudio Audio { get; }
+    public LobbyRoom? Room { get; private set; }
+    public RoomMember[] Members => members.Deserialize<RoomMember[]>(RoomCipher.JsonOptions) ?? [];
+    public long ConfigurationRevision => Interlocked.Read(ref configurationRevision);
+    public string ControlNotice { get; private set; } = "";
     public string Status { get; private set; } = "未连接";
     public bool Connected => networkReady && socket?.State == WebSocketState.Open && !stop.IsCancellationRequested;
     public bool SessionActive => running && !disposed && !stop.IsCancellationRequested;
     public event Action? Changed;
-    public RoomClient(ProfileStore? profileStore = null, Func<DesktopAudio, Task>? audioStart = null)
-    { profile = profileStore ?? new(); startAudio = audioStart ?? (engine => engine.StartAsync()); Audio = new(PublishAudio); }
-    public async Task CreateAsync(string name)
+    public RoomClient(ProfileStore? profileStore = null, Func<DesktopAudio, Task>? audioStart = null, Func<Action<byte,byte[]>, IRoomAudio>? audioFactory = null)
+    { profile = profileStore ?? new(); startAudio = audioStart is null ? engine => engine.StartAsync() : engine => audioStart((DesktopAudio)engine); Audio = audioFactory?.Invoke(PublishAudio) ?? new DesktopAudio(PublishAudio); }
+    public async Task CreateAsync(string name, string? roomName = null, bool publicRoom = false)
     {
         string origin = RoomService.DefaultOrigin;
         using var client = new HttpClient { BaseAddress = new Uri(origin), Timeout = TimeSpan.FromSeconds(15) };
         using var health = JsonDocument.Parse(await client.GetStringAsync("/health", stop.Token));
         if (!health.RootElement.TryGetProperty("protocol", out var version) || version.GetInt32() < 3) throw new InvalidOperationException("中继尚未升级到新版音乐房间。");
-        client.DefaultRequestHeaders.Add("X-VoiceBridge-Client", "0.11.0");
-        using var created = await client.PostAsync("/api/rooms", new StringContent("{\"player\":\"room\"}", Encoding.UTF8, "application/json"), stop.Token);
+        client.DefaultRequestHeaders.Add("X-VoiceBridge-Client", "0.12.0");
+        byte[] rootKey = RandomNumberGenerator.GetBytes(32);
+        using var created = await client.PostAsync("/api/rooms", new StringContent(JsonSerializer.Serialize(new { name = roomName ?? name + "的房间", @public = publicRoom, publicKey = publicRoom ? Convert.ToHexString(rootKey).ToLowerInvariant() : null }), Encoding.UTF8, "application/json"), stop.Token);
         if ((int)created.StatusCode == 429) throw new InvalidOperationException("当前房间已满或建房过于频繁，请稍后重试。");
         created.EnsureSuccessStatusCode();
         using var json = JsonDocument.Parse(await created.Content.ReadAsStringAsync(stop.Token)); var root = json.RootElement;
-        Invite = new(origin, root.GetProperty("id").GetString()!, root.GetProperty("listenToken").GetString()!, RandomNumberGenerator.GetBytes(32)); writer = root.GetProperty("writeToken").GetString();
+        Invite = new(origin, root.GetProperty("id").GetString()!, root.GetProperty("listenToken").GetString()!, rootKey, publicRoom); writer = root.GetProperty("writeToken").GetString();
         await JoinAsync(Invite, name);
     }
-    public async Task JoinAsync(RoomInvite invite, string name)
+    public async Task JoinAsync(RoomInvite invite, string name, string? hostToken = null)
     {
+        if (hostToken is not null) writer = hostToken;
         Invite = invite; Name = ProfileSettings.CleanName(name); if (Name.Length == 0) Name = "朋友";
         profile.Save(profile.Read() with { Nickname = Name });
         cipher = new(invite.Key, invite.RoomId); Status = "正在连接音乐房间…"; running = true;
         sessionLoop = Task.Run(SessionLoopAsync);
         await joined.Task.WaitAsync(TimeSpan.FromSeconds(20), stop.Token);
         await startAudio(Audio); Audio.SetNetworkConnected(Connected); SendFlags();
-        stateLoop = Task.Run(StateLoopAsync); Status = "已连接 · 打开网页控制房间"; Changed?.Invoke();
+        stateLoop = Task.Run(StateLoopAsync); Status = "已连接"; Changed?.Invoke();
     }
+    public async Task UpdateOptionsAsync(AudioOptions next)
+    {
+        long revision = Interlocked.Increment(ref configurationRevision);
+        if (!next.Microphone) Audio.PrivacyMute();
+        await configurationGate.WaitAsync(stop.Token);
+        try { if (revision != ConfigurationRevision) return; await Audio.ApplyAsync(next); SaveAudioPreferences(); SendFlags(); Changed?.Invoke(); }
+        finally { configurationGate.Release(); }
+    }
+    public void Rename(string name) => Queue(new { type = "rename", name = ProfileSettings.CleanName(name) });
+    public void Manage(string name, bool isPublic) => Queue(new { type = "room:update", name, @public = isPublic, publicKey = isPublic ? Convert.ToHexString(Invite.Key).ToLowerInvariant() : null });
+    public void Kick(string member) => Queue(new { type = "member:kick", memberId = member });
+    private void SaveAudioPreferences() { var value = Audio.Options; profile.Save(profile.Read() with { NoiseSuppression=value.NoiseSuppression, MicrophoneGain=value.MicrophoneGain, SpeakerGain=value.SpeakerGain, MusicGain=value.MusicGain, TalkMode=value.TalkMode, TalkKey=value.TalkKey, MicrophoneId=value.MicrophoneId, OutputId=value.OutputId }); }
     private void Queue(object value)
     {
         if (!Connected) return;
@@ -94,7 +113,7 @@ public sealed class RoomClient : IAsyncDisposable
             while (!stop.IsCancellationRequested)
             {
                 using var transport = new ClientWebSocket(); using var sessionStop = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
-                socket = transport; transport.Options.SetRequestHeader("Origin", Invite.Origin); transport.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+                socket = transport; transport.Options.SetRequestHeader("Origin", Invite.Origin); transport.Options.KeepAliveInterval = TimeSpan.FromSeconds(15); transport.Options.CollectHttpResponseDetails = true;
                 try
                 {
                     var originUri = new Uri(Invite.Origin);
@@ -103,7 +122,7 @@ public sealed class RoomClient : IAsyncDisposable
                     await transport.ConnectAsync(new Uri(wsOrigin + $"/api/rooms/{Invite.RoomId}/voice"), sessionStop.Token).WaitAsync(TimeSpan.FromSeconds(12), stop.Token);
                     object request = MemberId.Length > 0 && resumeToken is not null
                         ? new { type = "join", version = 3, role = "desktop", token = Invite.Token, resume = new { memberId = MemberId, token = resumeToken } }
-                        : new { type = "join", version = 3, role = "desktop", token = Invite.Token, name = Name, hostToken = writer, canResume = true };
+                        : new { type = "join", version = 3, role = "desktop", token = Invite.Token, name = Name, hostToken = writer, canResume = true, nativeControls = true };
                     await SendAsync(transport, JsonSerializer.SerializeToUtf8Bytes(request, RoomCipher.JsonOptions), false, sessionStop.Token);
                     var welcomed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                     var receive = ReceiveLoopAsync(transport, welcomed, sessionStop.Token); var send = SendLoopAsync(transport, sessionStop.Token);
@@ -112,21 +131,22 @@ public sealed class RoomClient : IAsyncDisposable
                         var first = await Task.WhenAny(welcomed.Task, receive, Task.Delay(15000, sessionStop.Token));
                         if (first != welcomed.Task) { if (receive.IsCompleted) await receive; throw new TimeoutException("入房响应超时"); }
                         await welcomed.Task; recoveryStarted = 0; attempt = 0;
-                        networkReady = true; Audio.SetNetworkConnected(true); SendFlags(); Status = "已连接 · 打开网页控制房间"; joined.TrySetResult(); Changed?.Invoke();
+                        Interlocked.Exchange(ref lastReceived, Environment.TickCount64); Interlocked.Exchange(ref lastPong, Environment.TickCount64); networkReady = true; Audio.SetNetworkConnected(true); SendFlags(); Status = "已连接"; joined.TrySetResult(); Changed?.Invoke();
                         await await Task.WhenAny(receive, send);
                     }
                     finally { sessionStop.Cancel(); transport.Abort(); try { await Task.WhenAll(receive, send); } catch (Exception) { } }
                 }
                 catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
-                catch (Exception ex) when (ex is WebSocketException or IOException or TimeoutException or OperationCanceledException or JsonException or CryptographicException)
+                catch (Exception ex) when (ex is WebSocketException or IOException or HttpRequestException or InvalidOperationException or TimeoutException or OperationCanceledException or JsonException or CryptographicException)
                 {
                     ClearQueues();
-                    if (ex is RoomDisconnected terminal && terminal.Code is 1000 or 4001 or 4003 or 4004 or 4009 or 4010)
+                    if (transport.HttpStatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.NotFound) { Status = "房间已关闭或邀请失效"; joined.TrySetException(ex); break; }
+                    if (ex is RoomDisconnected expired && expired.Code == 4010)
+                    { MemberId = ""; resumeToken = null; sequences[0] = sequences[1] = 0; seenRoster = false; connectionId = null; if (Invite.Public) { try { Invite = await LobbyClient.ResolveAsync(Invite.RoomId, stop.Token, Invite.Origin); } catch (Exception failure) when (failure is InvalidOperationException or HttpRequestException) { Status = failure.Message; break; } } continue; }
+                    if (ex is RoomDisconnected terminal && terminal.Code is 1000 or 4001 or 4003 or 4004 or 4009 or 4011)
                     { Status = terminal.Code == 4009 ? "房间已满，最多 8 人" : terminal.Code == 4010 ? "重连保留时间已结束，请重新加入房间" : "房间已结束或连接权限失效，请重新加入"; joined.TrySetException(ex); break; }
-                    if (MemberId.Length == 0) { Status = "无法连接房间：" + ex.Message; joined.TrySetException(ex); break; }
-                    if (resumeToken is null) { Status = "旧版服务不支持恢复，请重新加入"; break; }
+                    if (!joined.Task.IsCompletedSuccessfully) { Status = "无法连接房间：" + ex.Message; joined.TrySetException(ex); break; }
                     recoveryStarted = recoveryStarted == 0 ? Environment.TickCount64 : recoveryStarted;
-                    if (Environment.TickCount64 - recoveryStarted >= 90000) { Status = "网络中断超过 90 秒，请重新加入房间"; break; }
                     Status = "网络波动，正在自动重连… 音频上行已暂停"; Changed?.Invoke();
                     double delay = Math.Min(5000, 500 * Math.Pow(2, Math.Min(attempt++, 4))) * (.8 + Random.Shared.NextDouble() * .2);
                     await Task.Delay(TimeSpan.FromMilliseconds(delay), stop.Token);
@@ -166,6 +186,7 @@ public sealed class RoomClient : IAsyncDisposable
             do
             {
                 result = await transport.ReceiveAsync(bytes.AsMemory(count), token);
+                Interlocked.Exchange(ref lastReceived, Environment.TickCount64);
                 if (result.MessageType == WebSocketMessageType.Close) throw new RoomDisconnected((int?)transport.CloseStatus ?? 1006);
                 count += result.Count; if (count == bytes.Length && !result.EndOfMessage) throw new InvalidDataException("Room message too large.");
             } while (!result.EndOfMessage);
@@ -185,9 +206,9 @@ public sealed class RoomClient : IAsyncDisposable
                     if (root.TryGetProperty("resumed", out var resumed) && resumed.GetBoolean())
                     {
                         if (root.TryGetProperty("pendingControl", out var pending) && pending.ValueKind == JsonValueKind.Object) await HandleControlAsync(pending);
-                        if (!root.TryGetProperty("controllerPresent", out var present) || !present.GetBoolean()) Audio.PrivacyMute();
                     }
                     welcomed.TrySetResult(); break;
+                case "pong": Interlocked.Exchange(ref lastPong, Environment.TickCount64); break;
                 case "members":
                     var next = root.GetProperty("members").Clone(); var ids = next.EnumerateArray().Select(m => m.GetProperty("id").GetString()).ToHashSet();
                     foreach (var old in members.EnumerateArray()) if (!ids.Contains(old.GetProperty("id").GetString())) Audio.Mix.Remove(old.GetProperty("id").GetString()!);
@@ -200,10 +221,12 @@ public sealed class RoomClient : IAsyncDisposable
                     }
                     seenRoster = true; members = next; Changed?.Invoke(); break;
                 case "controllerAttached":
-                    if (hadController) Audio.PrivacyMute();
-                    connectionId = root.GetProperty("connectionId").GetString(); controlSequence = -1; stateSequence = 0; appliedRevision = 0; hadController = true; break;
-                case "controllerDetached": Audio.PrivacyMute(); connectionId = null; SendFlags(); break;
+                    connectionId = root.GetProperty("connectionId").GetString(); controlSequence = -1; stateSequence = 0; appliedRevision = 0; break;
+                case "controllerDetached": connectionId = null; SendFlags(); break;
                 case "control": await HandleControlAsync(root); break;
+                case "room": Room = root.Deserialize<LobbyRoom>(RoomCipher.JsonOptions); if (Room is not null) Invite = Invite with { Public = Room.Public }; Changed?.Invoke(); break;
+                case "invitation": if (RoomCipher.IsHex(root.GetProperty("token").GetString() ?? "",64)) Invite = Invite with { Token = root.GetProperty("token").GetString()! }; break;
+                case "room:error": Status = root.GetProperty("error").GetString() ?? "房间操作未完成"; Changed?.Invoke(); break;
             }
         }
     }
@@ -221,13 +244,15 @@ public sealed class RoomClient : IAsyncDisposable
         if (action == "leave") { _ = Task.Run(async () => await DisposeAsync()); return; }
         if (action == "configure")
         {
+            if (command.TryGetProperty("revision", out var receivedRevision)) appliedRevision = receivedRevision.GetInt64();
+            if (!command.TryGetProperty("baseRevision", out var expected) || expected.GetInt64() != ConfigurationRevision) { ControlNotice = "设置已在软件中变化，请重新操作"; return; }
             var next = command.GetProperty("options").Deserialize<AudioOptions>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             if (next is not null)
             {
-                await Audio.ApplyAsync(next);
-                profile.Save(profile.Read() with { NoiseSuppression = Audio.Options.NoiseSuppression });
+                await configurationGate.WaitAsync(stop.Token);
+                try { if (expected.GetInt64() != ConfigurationRevision) { ControlNotice = "设置已在软件中变化，请重新操作"; return; } Interlocked.Increment(ref configurationRevision); await Audio.ApplyAsync(next); SaveAudioPreferences(); ControlNotice = ""; }
+                finally { configurationGate.Release(); }
             }
-            if (connection != connectionId) Audio.PrivacyMute();
             else if (command.TryGetProperty("revision", out var revision)) appliedRevision = revision.GetInt64();
         }
         SendFlags(); Changed?.Invoke();
@@ -238,10 +263,12 @@ public sealed class RoomClient : IAsyncDisposable
         {
             while (!stop.IsCancellationRequested)
             {
+                if (Connected && (Environment.TickCount64 - Interlocked.Read(ref lastReceived) > 6500 || Environment.TickCount64 - Interlocked.Read(ref lastPong) > 8000)) { socket?.Abort(); }
+                else if (Connected && Environment.TickCount64 - lastPing > 2000) { lastPing = Environment.TickCount64; Queue(new { type = "ping", at = lastPing }); }
                 if (Connected && connectionId is { } connection)
                 {
                     var inventory = Audio.Inventory;
-                    Queue(cipher!.SealControl(MemberId, connection, stateSequence++, new { options = Audio.Options, noiseSuppressionAvailable = true, clientVersion = "0.11.0", microphones = inventory.Microphones, outputs = inventory.Outputs, sources = inventory.Sources.Select(s => new { s.Id, s.Name, s.Active }), status = Audio.Status, microphonePeak = Audio.MicrophonePeak, talking = Audio.Talking, streams = Audio.Mix.Statistics(), speakerPeak = Audio.Mix.Peak, appliedRevision, nativePlayback = true }, true));
+                    Queue(cipher!.SealControl(MemberId, connection, stateSequence++, new { options = Audio.Options, noiseSuppressionAvailable = true, clientVersion = "0.12.0", nativeControls = true, configurationRevision = ConfigurationRevision, controlNotice = ControlNotice, microphoneReady = Audio.MicrophoneReady, outputReady = Audio.OutputReady, microphones = inventory.Microphones, outputs = inventory.Outputs, sources = inventory.Sources.Select(s => new { s.Id, s.Name, s.Active }), status = Audio.Status, microphonePeak = Audio.MicrophonePeak, talking = Audio.Talking, streams = Audio.Mix.Statistics(), speakerPeak = Audio.Mix.Peak, appliedRevision, nativePlayback = true }, true));
                 }
                 await Task.Delay(500, stop.Token);
             }

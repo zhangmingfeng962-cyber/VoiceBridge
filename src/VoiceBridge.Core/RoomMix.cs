@@ -5,7 +5,7 @@ namespace VoiceBridge.Core;
 public sealed class RoomMix : IFloatSource, IDisposable
 {
     private sealed class StreamState(bool music) : IDisposable
-    { public readonly RoomDecoder Decoder = new(music); public readonly AdaptiveStream Buffer = new(music ? 2 : 1); public long LastSequence = -1; public void Dispose() => Decoder.Dispose(); }
+    { public readonly RoomDecoder Decoder = new(music); public readonly AdaptiveStream Buffer = new(music ? 2 : 1); public long LastSequence = -1, LastArrival; public float Peak; public void Dispose() => Decoder.Dispose(); }
     private readonly ConcurrentDictionary<string, StreamState> streams = new();
     private readonly ConcurrentDictionary<string, float> gains = new();
     private int disposed, closing;
@@ -23,10 +23,11 @@ public sealed class RoomMix : IFloatSource, IDisposable
         {
             if (Volatile.Read(ref disposed) != 0) return;
             if (sequence <= stream.LastSequence) return;
-            stream.LastSequence = sequence; stream.Buffer.AutoBuffer = AutoBuffer; stream.Buffer.Push(stream.Decoder.Decode(opus), now);
+            var decoded=stream.Decoder.Decode(opus);stream.Peak=decoded.Select(Math.Abs).DefaultIfEmpty().Max();stream.LastArrival=now;stream.LastSequence = sequence; stream.Buffer.AutoBuffer = AutoBuffer; stream.Buffer.Push(decoded, now);
         }
     }
     public void SetGain(string member, byte kind, float percent) => gains[member + ":" + kind] = float.IsFinite(percent) ? Math.Clamp(percent / 100, 0, 2) : 1;
+    public float PeakFor(string member) => streams.TryGetValue(member+":0",out var stream) && Environment.TickCount64-stream.LastArrival<700 ? stream.Peak : 0;
     public void Remove(string member)
     { foreach (var key in streams.Keys.Where(key => key.StartsWith(member + ":", StringComparison.Ordinal))) if (streams.TryRemove(key, out var stream)) { lock (stream) stream.Dispose(); } }
     public int Read(float[] buffer, int offset, int count)

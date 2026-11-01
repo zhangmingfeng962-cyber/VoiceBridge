@@ -31,7 +31,7 @@ public class PresentationTests
                 {
                     var button = new Button { Style = style, Content = enabled ? "创建房间 · 可用" : "创建房间 · 已入房，暂不可用", IsEnabled = enabled, Margin = new Thickness(18, 12, 18, 0) }; panel.Children.Add(button);
                     button.ApplyTemplate(); var border = (Border)button.Template.FindName("Chrome", button);
-                    if (!enabled) { Assert.Equal(Color.FromRgb(28, 41, 58), ((SolidColorBrush)border.Background).Color); var label = (ContentPresenter)button.Template.FindName("Label", button); Assert.Equal(Color.FromRgb(135, 152, 174), ((SolidColorBrush)System.Windows.Documents.TextElement.GetForeground(label)).Color); }
+                    if (!enabled) { Assert.Equal(Color.FromRgb(34, 34, 34), ((SolidColorBrush)border.Background).Color); var label = (ContentPresenter)button.Template.FindName("Label", button); Assert.Equal(Color.FromRgb(153, 153, 153), ((SolidColorBrush)System.Windows.Documents.TextElement.GetForeground(label)).Color); }
                 }
                 panel.Measure(new Size(620, 180)); panel.Arrange(new Rect(0, 0, 620, 180)); panel.UpdateLayout();
                 if (Environment.GetEnvironmentVariable("VOICEBRIDGE_STYLE_PREVIEW") is { } file)

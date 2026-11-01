@@ -8,6 +8,14 @@ public sealed record ProfileSettings
     public int Version { get; init; } = 1;
     public string Nickname { get; init; } = "朋友";
     public bool NoiseSuppression { get; init; } = true;
+    public float MicrophoneGain { get; init; } = 100;
+    public float SpeakerGain { get; init; } = 100;
+    public float MusicGain { get; init; } = 100;
+    public string TalkMode { get; init; } = "free";
+    public int TalkKey { get; init; } = 86;
+    public string MicrophoneId { get; init; } = "";
+    public string OutputId { get; init; } = "";
+    public ProfileSettings Sanitize() => this with { MicrophoneGain=Math.Clamp(float.IsFinite(MicrophoneGain)?MicrophoneGain:100,0,400),SpeakerGain=Math.Clamp(float.IsFinite(SpeakerGain)?SpeakerGain:100,0,200),MusicGain=Math.Clamp(float.IsFinite(MusicGain)?MusicGain:100,0,100),TalkMode=TalkMode=="ptt"?"ptt":"free",TalkKey=Math.Clamp(TalkKey,8,254),MicrophoneId=(MicrophoneId??"")[..Math.Min(1024,(MicrophoneId??"").Length)],OutputId=(OutputId??"")[..Math.Min(1024,(OutputId??"").Length)] };
     public static string CleanName(string? name)
     {
         string clean = Regex.Replace(name ?? "", @"[\p{C}]", "").Trim();
@@ -26,7 +34,7 @@ public sealed class ProfileStore(string? path = null)
             if (!File.Exists(file) || new FileInfo(file).Length > 4096) return new();
             var value = JsonSerializer.Deserialize<ProfileSettings>(File.ReadAllText(file), Json) ?? new();
             string name = ProfileSettings.CleanName(value.Nickname);
-            return value.Version == 1 ? value with { Nickname = name.Length > 0 ? name : "朋友" } : new();
+            return value.Version == 1 ? (value with { Nickname = name.Length > 0 ? name : "朋友" }).Sanitize() : new();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException) { return new(); }
     }
@@ -39,7 +47,7 @@ public sealed class ProfileStore(string? path = null)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(file))!);
                 string name = ProfileSettings.CleanName(value.Nickname);
-                File.WriteAllText(temporary, JsonSerializer.Serialize(value with { Version = 1, Nickname = name.Length > 0 ? name : "朋友" }, Json));
+                File.WriteAllText(temporary, JsonSerializer.Serialize((value with { Version = 1, Nickname = name.Length > 0 ? name : "朋友" }).Sanitize(), Json));
                 File.Move(temporary, file, true); return true;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { return false; }

@@ -5,7 +5,7 @@ $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if(!$OutputDirectory){$OutputDirectory=Join-Path $root 'artifacts/packages'}
 $output=[IO.Path]::GetFullPath($OutputDirectory)
 [IO.Directory]::CreateDirectory($output)|Out-Null
-$version='0.11.0'
+$version='0.12.0'
 $staging=Join-Path $output ('source-'+[Guid]::NewGuid().ToString('N'))
 $source=Join-Path $staging 'VoiceBridge'
 [IO.Directory]::CreateDirectory($source)|Out-Null
@@ -15,7 +15,7 @@ foreach($file in Get-ChildItem -LiteralPath $root -Recurse -File -Force){
   $relative=[IO.Path]::GetRelativePath($root,$file.FullName).Replace('\','/')
   $parts=$relative.Split('/')
   if($parts[0] -notin $allowed -or ($parts|Where-Object {$_ -in @('bin','obj','node_modules','.git','artifacts')})){continue}
-  if($file.Extension -in @('.exe','.pdb','.zip','.pem','.vbrelay') -or $file.Name -in @('shared-secret','relay.env','fixture-links.json','fixture-config.json') -or $file.Name -like '*profile*.json'){throw "Unexpected private/build file: $relative"}
+  if(($file.Extension -in @('.exe','.pdb','.zip','.pk8','.key','.vbrelay') -or ($file.Extension -eq '.pem' -and $relative -ne 'src/VoiceBridge.App/Assets/update-public.pem')) -or $file.Name -in @('shared-secret','relay.env','fixture-links.json','fixture-config.json') -or $file.Name -like '*profile*.json'){throw "Unexpected private/build file: $relative"}
   $target=Join-Path $source $relative
   [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))|Out-Null
   if($file.Extension -eq '.sh'){[IO.File]::WriteAllText($target,[IO.File]::ReadAllText($file.FullName).Replace("`r`n","`n"),[Text.UTF8Encoding]::new($false))}else{[IO.File]::Copy($file.FullName,$target)};$count++

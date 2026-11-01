@@ -8,6 +8,7 @@ import {turnIssuer} from './turn-issuer.mjs';
 const stun=dgram.createSocket('udp4');stun.on('message',(request,remote)=>{if(request.length<20||request.readUInt16BE(0)!==1||request.readUInt32BE(4)!==0x2112a442)return;const response=Buffer.alloc(32);response.writeUInt16BE(0x101,0);response.writeUInt16BE(12,2);request.copy(response,4,4,20);response.writeUInt16BE(0x20,20);response.writeUInt16BE(8,22);response[25]=1;response.writeUInt16BE(remote.port^0x2112,26);const ip=remote.address.split('.').reduce((n,b)=>(n*256+Number(b))>>>0,0);response.writeUInt32BE((ip^0x2112a442)>>>0,28);stun.send(response,remote.port,remote.address);});
 await new Promise(resolve=>stun.bind(0,'127.0.0.1',resolve));
 const source=fileURLToPath(new URL('../../',import.meta.url)),fixtures=fileURLToPath(new URL('./',import.meta.url)),base=path.resolve('artifacts/browser-test'),runtime=path.join(base,'runtime');fs.mkdirSync(runtime,{recursive:true});fs.cpSync(path.join(source,'web'),path.join(runtime,'web'),{recursive:true});
+fs.mkdirSync(path.join(runtime,'node_modules'),{recursive:true});fs.cpSync(path.join(source,'node_modules/ws'),path.join(runtime,'node_modules/ws'),{recursive:true});
 fs.copyFileSync(path.join(source,'screen-room.mjs'),path.join(runtime,'screen-room.mjs'));
 fs.copyFileSync(path.join(source,'outbound.mjs'),path.join(runtime,'outbound.mjs'));
 for(const name of ['synthetic-capture.js','browser-test.js'])fs.copyFileSync(path.join(fixtures,name),path.join(runtime,'web',name));
@@ -21,7 +22,7 @@ if(transport){
  script=script.replace('turnTested:false','turnTested:true,turnTransport:'+JSON.stringify(transport));fs.writeFileSync(path.join(runtime,'web/browser-test.js'),script);
 }
 let code=fs.readFileSync(path.join(source,'server.mjs'),'utf8').replace("from 'ws'",'from '+JSON.stringify(pathToFileURL(path.join(source,'node_modules/ws/wrapper.mjs')).href));
-code=code.replace("'room.css']","'room.css','synthetic-capture.js','browser-test.js']");
+code=code.replace("'brand.png']","'brand.png','synthetic-capture.js','browser-test.js']");
 const marker="if(req.method==='GET'&&url.pathname==='/health')";
 if(!code.includes(marker))throw Error('Fixture route marker missing');
 code=code.replace(marker,`if(req.method==='GET'&&url.pathname==='/__fixture/config'){json(res,200,JSON.parse(await readFile(new URL('./fixture-config.json',import.meta.url),'utf8')));return;}
@@ -31,6 +32,7 @@ if(req.method==='POST'&&url.pathname==='/__fixture/report'){const pieces=[];let 
 if(req.method==='GET'&&url.pathname==='/__screen-fixture'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});res.end(await readFile(new URL('./web/fixture.html',import.meta.url)));return;}
 ${marker}`);
 fs.writeFileSync(path.join(runtime,'server.mjs'),code);
+let landing=fs.readFileSync(path.join(runtime,'web/home.html'),'utf8').replace('<script type="module"','<script src="/synthetic-capture.js"></script><script type="module"');fs.writeFileSync(path.join(runtime,'web/home.html'),landing);
 let html=fs.readFileSync(path.join(runtime,'web/room.html'),'utf8').replace('<script type="module"','<script src="/synthetic-capture.js"></script><script type="module"');fs.writeFileSync(path.join(runtime,'web/room.html'),html);
 fs.writeFileSync(path.join(runtime,'web/fixture.html'),`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>VoiceBridge 屏幕共享浏览器验证</title><style>body{background:#101927;color:#edf6ff;font:16px system-ui;margin:32px}button{font:inherit;padding:12px 20px;border:0;border-radius:8px;background:#68d8b0;color:#10251e;cursor:pointer}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:20px 0}article{background:#1b2b3f;border:1px solid #38516b;border-radius:12px;padding:15px}video{width:100%;aspect-ratio:16/9;background:#050b11}li{padding:6px;color:#92e9c7}p{color:#b8cee4}#status{font-size:20px;color:#8ee6bd}</style><h1>屏幕共享 · 真实浏览器验证</h1><p>画面来自合成画布，只验证视频管道；不读取真实屏幕或麦克风。</p><button id="run">开始视频验证</button><p id="status">等待开始</p><div class="grid">${[0,1,2].map((i)=>`<article><h3>${['发起者','观看者一','观看者二'][i]}</h3><p id="state${i}">待连接</p><video id="video${i}" autoplay muted playsinline></video></article>`).join('')}</div><ol id="results"></ol><script src="/synthetic-capture.js"></script><script type="module" src="/browser-test.js"></script></html>`);
 const {startServer}=await import(pathToFileURL(path.join(runtime,'server.mjs')));
