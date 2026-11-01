@@ -132,6 +132,7 @@ public partial class MainWindow : Window
     {
         bool active=room?.SessionActive==true;MicButton.IsEnabled=LeaveButton.IsEnabled=CopyButton.IsEnabled=CurrentRoomButton.IsEnabled=OpenButton.IsEnabled=active;
         if(room is null){ConnectionText.Text="还没有加入房间";MicButton.Content="开启麦克风";ManageButton.Visibility=Visibility.Collapsed;return;}
+        if(!NicknameBox.IsKeyboardFocusWithin&&room.Name!=NicknameBox.Text)NicknameBox.Text=room.Name;
         var audio=room.Audio;var options=audio.Options;
         ConnectionText.Text=room.Connected?((!options.Microphone||audio.MicrophoneReady)?"已连接":"已连接，麦克风设备待恢复"):"正在恢复连接";
         if(RoomView.Visibility==Visibility.Visible){ViewTitle.Text=room.Room?.Name??"音乐房间";ViewHint.Text=(room.Room?.Public==true?"公开房间":"邀请房间")+"，"+room.Members.Length+" / 8 人";}

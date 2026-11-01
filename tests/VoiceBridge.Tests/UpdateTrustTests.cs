@@ -12,7 +12,7 @@ public class UpdateTrustTests
         string? root=AppContext.BaseDirectory;while(root is not null&&!File.Exists(Path.Combine(root,"VoiceBridge.sln")))root=Path.GetDirectoryName(root);Assert.NotNull(root);
         string directory=Path.Combine(Path.GetTempPath(),"VoiceBridge-package-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);
         using var key=ECDsa.Create(ECCurve.NamedCurves.nistP256);byte[] package=RandomNumberGenerator.GetBytes(262144);string sha=Convert.ToHexString(SHA256.HashData(package));
-        byte[] feed=Encoding.UTF8.GetBytes("{\"Assets\":[{\"PackageId\":\"VoiceBridge\",\"Version\":\"0.12.0\",\"Type\":\"Full\",\"FileName\":\"sample.nupkg\",\"SHA256\":\""+sha+"\",\"Size\":262144}]}");
+        byte[] feed=Encoding.UTF8.GetBytes("{\"Assets\":[{\"PackageId\":\"VoiceBridge.Desktop\",\"Version\":\"0.12.0\",\"Type\":\"Full\",\"FileName\":\"sample.nupkg\",\"SHA256\":\""+sha+"\",\"Size\":262144}]}");
         await File.WriteAllBytesAsync(Path.Combine(directory,"releases.win-x64.json"),feed);await File.WriteAllTextAsync(Path.Combine(directory,"releases.win-x64.json.sig"),Convert.ToBase64String(key.SignData(feed,HashAlgorithmName.SHA256,DSASignatureFormat.Rfc3279DerSequence)));await File.WriteAllBytesAsync(Path.Combine(directory,"sample.nupkg"),package);
         var start=new ProcessStartInfo("node"){WorkingDirectory=root,UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true};start.ArgumentList.Add("relay/tests/update-http-fixture.mjs");start.ArgumentList.Add(directory);using var process=Process.Start(start)!;
         try{

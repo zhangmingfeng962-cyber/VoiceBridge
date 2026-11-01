@@ -14,7 +14,7 @@ public class UpdateRoomGuardTests
         string path=Path.Combine(Path.GetTempPath(),"VoiceBridge-update-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(path);
         try
         {
-            var source=new FakeSource();var locator=new TestVelopackLocator("VoiceBridge","0.12.0",path);
+            var source=new FakeSource();var locator=new TestVelopackLocator("VoiceBridge.Desktop","0.12.0",path);
             var manager=new UpdateManager(source,new UpdateOptions{ExplicitChannel="win-x64"},locator);
             var service=new UpdateService(()=>true,manager);await service.CheckAsync();Assert.True(service.Available);
             await service.UpdateAsync();Assert.True(service.Deferred);Assert.False(service.Busy);
@@ -25,7 +25,7 @@ public class UpdateRoomGuardTests
     private sealed class FakeSource:IUpdateSource
     {
         public int Downloads;
-        public Task<VelopackAssetFeed> GetReleaseFeed(IVelopackLogger logger,string? appId,string? channel,Guid? stagingId,VelopackAsset? latestLocalRelease)=>Task.FromResult(VelopackAssetFeed.FromJson("{\"Assets\":[{\"PackageId\":\"VoiceBridge\",\"Version\":\"0.12.1\",\"Type\":\"Full\",\"FileName\":\"VoiceBridge-0.12.1-win-x64-full.nupkg\",\"SHA256\":\""+new string('1',64)+"\",\"Size\":100}]}"));
+        public Task<VelopackAssetFeed> GetReleaseFeed(IVelopackLogger logger,string? appId,string? channel,Guid? stagingId,VelopackAsset? latestLocalRelease)=>Task.FromResult(VelopackAssetFeed.FromJson("{\"Assets\":[{\"PackageId\":\"VoiceBridge.Desktop\",\"Version\":\"0.12.1\",\"Type\":\"Full\",\"FileName\":\"VoiceBridge-0.12.1-win-x64-full.nupkg\",\"SHA256\":\""+new string('1',64)+"\",\"Size\":100}]}"));
         public Task DownloadReleaseEntry(IVelopackLogger logger,VelopackAsset releaseEntry,string localFile,Action<int> progress,CancellationToken cancelToken){Downloads++;throw new InvalidOperationException("Room must not start downloads");}
     }
 }

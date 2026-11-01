@@ -10,5 +10,5 @@ try {
  $runtime=Get-Content artifacts/install-app/VoiceBridge.runtimeconfig.json -Raw|ConvertFrom-Json
  if(@($runtime.runtimeOptions.includedFrameworks|Where-Object {$_.version -ne '10.0.14'}).Count){throw 'Runtime must be 10.0.14'}
  dotnet tool install vpk --version 1.2.161 --tool-path artifacts/tools
- & artifacts/tools/vpk.exe pack --packId VoiceBridge --packVersion $Version --packDir artifacts/install-app --mainExe VoiceBridge.exe --channel win-x64 --runtime win-x64 --packTitle VoiceBridge --icon src/VoiceBridge.App/Assets/voicebridge.ico --shortcuts Desktop,StartMenuRoot --delta BestSpeed --releaseNotes $Notes --outputDir $OutputDirectory
+ & artifacts/tools/vpk.exe pack --packId VoiceBridge.Desktop --packVersion $Version --packDir artifacts/install-app --mainExe VoiceBridge.exe --channel win-x64 --runtime win-x64 --packTitle VoiceBridge --icon src/VoiceBridge.App/Assets/voicebridge.ico --shortcuts Desktop,StartMenuRoot --delta BestSpeed --releaseNotes $Notes --outputDir $OutputDirectory
 } finally {Pop-Location}

@@ -9,6 +9,8 @@ jobs:
   validate:
     runs-on: windows-latest
     timeout-minutes: 30
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -38,6 +40,11 @@ jobs:
           & scripts/Package-Preview.ps1 -OutputDirectory artifacts/source
           node scripts/Build-OfflineRelay.mjs artifacts/offline-relay
           Get-ChildItem artifacts/installer -File | Get-FileHash -Algorithm SHA256 | Format-Table | Out-File artifacts/installer-hashes.txt
+      - name: Stage verified public release bundle for the existing ECS
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/Upload-ReleaseBundle.py
       - uses: actions/upload-artifact@v4
         with:
           name: VoiceBridge-0.12.0-candidate

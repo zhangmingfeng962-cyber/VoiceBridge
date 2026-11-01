@@ -21,7 +21,7 @@ public sealed class SignedWebSource(Uri root, string publicKey) : IUpdateSource
         if (!verifier.VerifyData(bytes, Convert.FromBase64String(signature.Trim()), HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence)) throw new CryptographicException("更新清单签名不匹配，保留当前版本");
         var feed = VelopackAssetFeed.FromJson(Encoding.UTF8.GetString(bytes));
         foreach (var asset in feed.Assets)
-            if (asset.PackageId != "VoiceBridge" || string.IsNullOrEmpty(asset.FileName) || asset.FileName.Contains("..", StringComparison.Ordinal) || asset.FileName.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('.' or '-' or '_')) || asset.Size <= 0 || asset.Size > 314572800 || asset.SHA256?.Length != 64 || !asset.SHA256.All(Uri.IsHexDigit)) throw new InvalidDataException("更新文件信息无效");
+            if (asset.PackageId != "VoiceBridge.Desktop" || string.IsNullOrEmpty(asset.FileName) || asset.FileName.Contains("..", StringComparison.Ordinal) || asset.FileName.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('.' or '-' or '_')) || asset.Size <= 0 || asset.Size > 314572800 || asset.SHA256?.Length != 64 || !asset.SHA256.All(Uri.IsHexDigit)) throw new InvalidDataException("更新文件信息无效");
         return feed;
     }
     public async Task<VelopackAssetFeed> GetReleaseFeed(IVelopackLogger logger, string? appId, string? channel, Guid? stagingId, VelopackAsset? latestLocalRelease)
