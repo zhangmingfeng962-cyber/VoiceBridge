@@ -1,6 +1,6 @@
 # 0.12.0 部署与回滚
 
-使用已有 Ubuntu 24.04 ECS、Node 22.23.3、Nginx、HTTPS 与 coturn；无需新增公网端口或云资源。当前部署仍是 0.11.0，0.12.0 为待验证候选。
+使用已有 Ubuntu 24.04 ECS、Node 22.23.3、Nginx、HTTPS 与 coturn；无需新增公网端口或云资源。当前部署为 0.12.0，发布源由最终 CI 构建并经过签名及逐文件 SHA256 检查。
 
 候选中继通过 `scripts/Build-OfflineRelay.mjs` 生成包含校验摘要的离线源包。发布环境必须校验固定提交及源包 SHA256，解包到独立版本目录，先在仅回环可访问端口验证，再原子切换 `/opt/voicebridge/current`。保留旧指针及 Nginx、systemd 备份。
 
@@ -13,3 +13,12 @@ Nginx 的 `/downloads/` 与 `/updates/` 转发到 3101，关闭响应缓冲，�
 正式切换必须在无活跃 WebSocket 房间时进行。为避免检查与重启间新增连接，短时暂停新建/加入入口，复查无存量连接后切换；若仍有人在线，取消切换并恢复入口。健康检查失败时立即恢复原指针、Nginx 配置及旧服务。现有房间是内存会话，绝不强制重启活跃房间。
 
 安装包与 GitHub 正式发布依赖国内中继、更新分发的实际验证，不得把候选构建成功当作已上线。
+
+
+## 当前运行位置
+
+- `/opt/voicebridge/current` 指向 `/opt/voicebridge/releases/0.12.0-web1`。
+- `voicebridge.service` 负责房间，`voicebridge-download.service` 负责回环 3101 的流式下载，Nginx 通过现有 443 提供网站和分发。
+- 旧版指针在 `/etc/voicebridge/backups/release-before-0.12.0`，旧 Nginx 配置在同目录 `nginx-before-0.12.0.conf`。回滚前同样确认空房，恢复原指针和 Nginx 配置后再重启旧服务。
+- 旧下载 `/downloads/VoiceBridge.exe` 作为回滚保留；新下载是 `/downloads/VoiceBridgeSetup.exe`。
+- `scripts/Deploy-Public012.mjs` 包含固定产物校验、恢复观察、激活和失败回滚。该脚本是指定发布的运维入口，不应当作不经审查的通用升级器。

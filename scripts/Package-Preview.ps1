@@ -14,7 +14,7 @@ $count=0
 foreach($file in Get-ChildItem -LiteralPath $root -Recurse -File -Force){
   $relative=[IO.Path]::GetRelativePath($root,$file.FullName).Replace('\','/')
   $parts=$relative.Split('/')
-  if($parts[0] -notin $allowed -or ($parts|Where-Object {$_ -in @('bin','obj','node_modules','.git','artifacts')})){continue}
+  if($parts[0] -notin $allowed -or ($parts|Where-Object {$_ -in @('bin','obj','node_modules','.git','artifacts','__pycache__')})){continue}
   if(($file.Extension -in @('.exe','.pdb','.zip','.pk8','.key','.vbrelay') -or ($file.Extension -eq '.pem' -and $relative -ne 'src/VoiceBridge.App/Assets/update-public.pem')) -or $file.Name -in @('shared-secret','relay.env','fixture-links.json','fixture-config.json') -or $file.Name -like '*profile*.json'){throw "Unexpected private/build file: $relative"}
   $target=Join-Path $source $relative
   [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))|Out-Null

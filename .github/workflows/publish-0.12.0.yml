@@ -1,0 +1,47 @@
+name: Publish verified VoiceBridge 0.12.0
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/publish-0.12.0.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check domestic relay and update trust before publication
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $health=Invoke-RestMethod 'https://voicebridge-room.cn/health' -TimeoutSec 20
+          if($health.release -ne '0.12.0' -or !$health.nativeControls -or !$health.lobby){throw 'Compatible domestic backend must be active'}
+          $http=[Net.Http.HttpClient]::new()
+          [byte[]]$feed=$http.GetByteArrayAsync('https://voicebridge-room.cn/updates/releases.win-x64.json').GetAwaiter().GetResult()
+          $signature=$http.GetStringAsync('https://voicebridge-room.cn/updates/releases.win-x64.json.sig').GetAwaiter().GetResult().Trim()
+          $key=[Security.Cryptography.ECDsa]::Create()
+          $key.ImportFromPem([IO.File]::ReadAllText((Join-Path $PWD 'src/VoiceBridge.App/Assets/update-public.pem')))
+          if(!$key.VerifyData($feed,[Convert]::FromBase64String($signature),[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.DSASignatureFormat]::Rfc3279DerSequence)){throw 'Domestic update signature invalid'}
+          $key.Dispose();$http.Dispose()
+          if([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($feed)).ToLowerInvariant() -ne '83ef48e10c0f9a2195548cd3e07a106116c3d8edfac0ee421e0e8639807474bf'){throw 'Domestic update release differs'}
+      - name: Retrieve the exact validated build
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/Fetch-StagedRelease.py 417d03299f158ec3794f7913711441d2fdf9d728 068c8f74a52c903f5648d4cc0dfbef274d75b699b643a63578af6c8fd870d9e4 artifacts/release
+      - name: Publish installer, source, update feed and checksums
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $PSNativeCommandUseErrorActionPreference=$true
+          Copy-Item deployment/releases.win-x64.json.sig artifacts/release/releases.win-x64.json.sig
+          gh release create v0.12.0 --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --title 'VoiceBridge 0.12.0 · 游戏连麦与房间大厅' --notes-file docs/RELEASE-NOTES-0.12.0.md --latest artifacts/release/VoiceBridgeSetup.exe artifacts/release/VoiceBridge-v0.12.0-source.zip artifacts/release/VoiceBridge.Desktop-0.12.0-win-x64-full.nupkg artifacts/release/releases.win-x64.json artifacts/release/releases.win-x64.json.sig artifacts/release/SHA256SUMS.txt

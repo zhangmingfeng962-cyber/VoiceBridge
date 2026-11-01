@@ -7,3 +7,8 @@ VoiceBridge 0.12.0
 - 下载使用独立流式进程、断点续传和全局自适应预算。
 
 0.11 用户需手动安装一次新版。实际音视频效果仍受网络与设备限制。
+
+
+下载：[Windows 安装版](https://voicebridge-room.cn/downloads/VoiceBridgeSetup.exe)。网站：[房间大厅](https://voicebridge-room.cn/)。
+
+21 项客户端测试、41 项网页/服务端测试通过，后台合成音频长测通过。相同 4 MiB 下载样本从 8.45 秒缩短到 3.92 秒；有实时音视频负载时会主动减速。真实朋友端听感、Win10 实机及跨设备延迟尚未验收，具体证据与边界见 docs/VERIFICATION-0.12.0.md。

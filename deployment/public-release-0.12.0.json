@@ -1,0 +1,24 @@
+{
+  "version": "0.12.0",
+  "sourceCommit": "4877496cbc87d698878f328bc8ddb08dc58fae83",
+  "transferCommit": "417d03299f158ec3794f7913711441d2fdf9d728",
+  "files": {
+    "VoiceBridgeSetup.exe": {
+      "bytes": 85974445,
+      "sha256": "5ac15a3f0888313f8afd24dd9d1b3c4dc8dcec07d048cec9ba9ee0d642e0ed86"
+    },
+    "VoiceBridge.Desktop-0.12.0-win-x64-full.nupkg": {
+      "bytes": 78283693,
+      "sha256": "9cdc3f24af8fae021aaf911d4c456ee56a1975d10b34721ecab986a1da531292"
+    },
+    "releases.win-x64.json": {
+      "bytes": 1524,
+      "sha256": "83ef48e10c0f9a2195548cd3e07a106116c3d8edfac0ee421e0e8639807474bf"
+    },
+    "VoiceBridge-v0.12.0-source.zip": {
+      "bytes": 3073232,
+      "sha256": "678b41a71a4bfc5669241440589f45b9463a3da7c606907288df766037e96376"
+    }
+  },
+  "candidateRun": 41289679604
+}

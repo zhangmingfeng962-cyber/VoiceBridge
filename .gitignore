@@ -18,3 +18,6 @@ ducking-before-*.json
 relay-profile*.json
 *.vbrelay
 **/node_modules/
+
+__pycache__/
+*.pyc

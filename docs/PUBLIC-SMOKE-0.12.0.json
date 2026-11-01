@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "syntheticOnly": true,
+  "realMicrophone": false,
+  "realScreen": false,
+  "checks": [
+    "public lobby, opt-in and credential isolation",
+    "separate AES-GCM voice/music round trip",
+    "page disconnect does not mute native microphone",
+    "page replacement preserves native voice",
+    "same member resumes and continues encrypted audio",
+    "rename and private transition keep members connected",
+    "owner exit transfers management without closing room",
+    "synthetic test room cleaned"
+  ]
+}
