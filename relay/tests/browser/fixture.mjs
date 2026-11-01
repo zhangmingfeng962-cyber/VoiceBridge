@@ -22,7 +22,7 @@ if(transport){
  script=script.replace('turnTested:false','turnTested:true,turnTransport:'+JSON.stringify(transport));fs.writeFileSync(path.join(runtime,'web/browser-test.js'),script);
 }
 let code=fs.readFileSync(path.join(source,'server.mjs'),'utf8').replace("from 'ws'",'from '+JSON.stringify(pathToFileURL(path.join(source,'node_modules/ws/wrapper.mjs')).href));
-code=code.replace("'brand.png']","'brand.png','synthetic-capture.js','browser-test.js']");
+code=code.replace("'brand.ico']","'brand.ico','synthetic-capture.js','browser-test.js']");
 const marker="if(req.method==='GET'&&url.pathname==='/health')";
 if(!code.includes(marker))throw Error('Fixture route marker missing');
 code=code.replace(marker,`if(req.method==='GET'&&url.pathname==='/__fixture/config'){json(res,200,JSON.parse(await readFile(new URL('./fixture-config.json',import.meta.url),'utf8')));return;}
