@@ -1,3 +1,4 @@
+using VoiceBridge.App.Accounts;
 using System.IO;
 using System.Net.Http;
 using System.Net.WebSockets;
@@ -23,6 +24,7 @@ public sealed class RoomClient : IAsyncDisposable
     private readonly Channel<byte> wake = Channel.CreateBounded<byte>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
     private readonly uint[] sequences = [0, 0];
     private readonly ProfileStore profile;
+    private readonly Func<string,string?> authorization;
     private readonly Func<IRoomAudio, Task> startAudio;
     private Task? sessionLoop, stateLoop;
     private string? writer, connectionId, resumeToken;
@@ -48,15 +50,16 @@ public sealed class RoomClient : IAsyncDisposable
     public bool Connected => networkReady && socket?.State == WebSocketState.Open && !stop.IsCancellationRequested;
     public bool SessionActive => running && !disposed && !stop.IsCancellationRequested;
     public event Action? Changed;
-    public RoomClient(ProfileStore? profileStore = null, Func<DesktopAudio, Task>? audioStart = null, Func<Action<byte,byte[]>, IRoomAudio>? audioFactory = null)
-    { profile = profileStore ?? new(); startAudio = audioStart is null ? engine => engine.StartAsync() : engine => audioStart((DesktopAudio)engine); Audio = audioFactory?.Invoke(PublishAudio) ?? new DesktopAudio(PublishAudio); }
+    public RoomClient(ProfileStore? profileStore = null, Func<DesktopAudio, Task>? audioStart = null, Func<Action<byte,byte[]>, IRoomAudio>? audioFactory = null, Func<string,string?>? authentication = null)
+    { authorization=authentication??(origin=>origin==RoomService.DefaultOrigin?AccountClient.Current.Bearer:null);profile = profileStore ?? new(); startAudio = audioStart is null ? engine => engine.StartAsync() : engine => audioStart((DesktopAudio)engine); Audio = audioFactory?.Invoke(PublishAudio) ?? new DesktopAudio(PublishAudio); }
     public async Task CreateAsync(string name, string? roomName = null, bool publicRoom = false)
     {
         string origin = RoomService.DefaultOrigin;
         using var client = new HttpClient { BaseAddress = new Uri(origin), Timeout = TimeSpan.FromSeconds(15) };
         using var health = JsonDocument.Parse(await client.GetStringAsync("/health", stop.Token));
         if (!health.RootElement.TryGetProperty("protocol", out var version) || version.GetInt32() < 3) throw new InvalidOperationException("中继尚未升级到新版音乐房间。");
-        client.DefaultRequestHeaders.Add("X-VoiceBridge-Client", "0.12.0");
+        client.DefaultRequestHeaders.Add("X-VoiceBridge-Client", "0.13.0");
+        if(authorization(origin) is {} bearer)client.DefaultRequestHeaders.Authorization=new("Bearer",bearer);
         byte[] rootKey = RandomNumberGenerator.GetBytes(32);
         using var created = await client.PostAsync("/api/rooms", new StringContent(JsonSerializer.Serialize(new { name = roomName ?? name + "的房间", @public = publicRoom, publicKey = publicRoom ? Convert.ToHexString(rootKey).ToLowerInvariant() : null }), Encoding.UTF8, "application/json"), stop.Token);
         if ((int)created.StatusCode == 429) throw new InvalidOperationException("当前房间已满或建房过于频繁，请稍后重试。");
@@ -113,7 +116,8 @@ public sealed class RoomClient : IAsyncDisposable
             while (!stop.IsCancellationRequested)
             {
                 using var transport = new ClientWebSocket(); using var sessionStop = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
-                socket = transport; transport.Options.SetRequestHeader("Origin", Invite.Origin); transport.Options.KeepAliveInterval = TimeSpan.FromSeconds(15); transport.Options.CollectHttpResponseDetails = true;
+                socket = transport; transport.Options.SetRequestHeader("Origin", Invite.Origin);
+                if(authorization(Invite.Origin) is {} bearer)transport.Options.SetRequestHeader("Authorization","Bearer "+bearer); transport.Options.KeepAliveInterval = TimeSpan.FromSeconds(15); transport.Options.CollectHttpResponseDetails = true;
                 try
                 {
                     var originUri = new Uri(Invite.Origin);
@@ -121,8 +125,8 @@ public sealed class RoomClient : IAsyncDisposable
                     string wsOrigin = Invite.Origin.Replace("https:", "wss:", StringComparison.Ordinal).Replace("http:", "ws:", StringComparison.Ordinal);
                     await transport.ConnectAsync(new Uri(wsOrigin + $"/api/rooms/{Invite.RoomId}/voice"), sessionStop.Token).WaitAsync(TimeSpan.FromSeconds(12), stop.Token);
                     object request = MemberId.Length > 0 && resumeToken is not null
-                        ? new { type = "join", version = 3, role = "desktop", token = Invite.Token, resume = new { memberId = MemberId, token = resumeToken } }
-                        : new { type = "join", version = 3, role = "desktop", token = Invite.Token, name = Name, hostToken = writer, canResume = true, nativeControls = true };
+                        ? new { type = "join", version = 4, role = "desktop", token = Invite.Token, resume = new { memberId = MemberId, token = resumeToken } }
+                        : new { type = "join", version = 4, role = "desktop", token = Invite.Token, name = Name, hostToken = writer, canResume = true, nativeControls = true };
                     await SendAsync(transport, JsonSerializer.SerializeToUtf8Bytes(request, RoomCipher.JsonOptions), false, sessionStop.Token);
                     var welcomed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                     var receive = ReceiveLoopAsync(transport, welcomed, sessionStop.Token); var send = SendLoopAsync(transport, sessionStop.Token);
@@ -140,7 +144,7 @@ public sealed class RoomClient : IAsyncDisposable
                 catch (Exception ex) when (ex is WebSocketException or IOException or HttpRequestException or InvalidOperationException or TimeoutException or OperationCanceledException or JsonException or CryptographicException)
                 {
                     ClearQueues();
-                    if (transport.HttpStatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.NotFound) { Status = "房间已关闭或邀请失效"; joined.TrySetException(ex); break; }
+                    if (transport.HttpStatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.NotFound) { Status = "房间已关闭或邀请失效"; joined.TrySetException(ex); break; }
                     if (ex is RoomDisconnected expired && expired.Code == 4010)
                     { MemberId = ""; resumeToken = null; sequences[0] = sequences[1] = 0; seenRoster = false; connectionId = null; if (Invite.Public) { try { Invite = await LobbyClient.ResolveAsync(Invite.RoomId, stop.Token, Invite.Origin); } catch (Exception failure) when (failure is InvalidOperationException or HttpRequestException) { Status = failure.Message; break; } } continue; }
                     if (ex is RoomDisconnected terminal && terminal.Code is 1000 or 4001 or 4003 or 4004 or 4009 or 4011)

@@ -53,6 +53,11 @@
           "Newtonsoft.Json": "13.0.1"
         }
       },
+      "Microsoft.Web.WebView2": {
+        "type": "Transitive",
+        "resolved": "1.0.4314.35",
+        "contentHash": "x5MFf2W03xueU1mMNvivXfHSsQ+ODo7vJ36qw/dLtU5Gs+8d7+7N7zzmNNDoT3ffosmcvZNBtUnlzyiDUuBkSQ=="
+      },
       "NAudio.Core": {
         "type": "Transitive",
         "resolved": "2.2.1",
@@ -119,6 +124,7 @@
       "VoiceBridge": {
         "type": "Project",
         "dependencies": {
+          "Microsoft.Web.WebView2": "[1.0.4314.35, )",
           "NAudio.Wasapi": "[2.2.1, )",
           "Velopack": "[1.2.161, )",
           "VoiceBridge.Core": "[1.0.0, )"

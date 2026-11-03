@@ -17,11 +17,14 @@ export class ScreenView{
     byId('screenSoundGain').oninput=()=>{this.setVolume(Number(byId('screenSoundGain').value));this.syncSound();};
     byId('screenSource').onchange=()=>this.setSource(byId('screenSource').value);
     byId('screenListenGain').oninput=()=>{if(this.state.owner)this.setListening(this.state.owner,Number(byId('screenListenGain').value));this.syncSound();};
-    byId('screenExpand').onclick=()=>{const panel=byId('screenPanel');this.collapsed=false;panel.classList.toggle('screenExpanded');byId('screenExpand').textContent=panel.classList.contains('screenExpanded')?'还原布局':'放大画面';this.render();};
+    const stage=byId('screenStage');
+    const expand=()=>{if(!this.state.owner)return;this.collapsed=false;byId('screenPanel').classList.toggle('screenExpanded');this.render();};
+    const fullscreen=async()=>{if(!this.state.owner)return;try{if(document.fullscreenElement===stage)await document.exitFullscreen();else await stage.requestFullscreen();}catch{this.status('浏览器未允许全屏，可双击画面放大');}};
+    stage.ondblclick=event=>{if(!event.target.closest('button'))expand();};
+    stage.onkeydown=event=>{if(event.target!==stage)return;if(event.key==='Enter'){event.preventDefault();expand();}if(event.key.toLowerCase()==='f'){event.preventDefault();void fullscreen();}if(event.key==='Escape')byId('screenPanel').classList.remove('screenExpanded');};
     byId('screenCollapse').onclick=()=>{this.collapsed=!this.collapsed;this.render();};
-    byId('screenFullscreen').onclick=async()=>{try{await byId('screenStage').requestFullscreen();}catch{this.status('浏览器未允许全屏，可以使用“放大画面”');}};
-    byId('screenExitFullscreen').onclick=()=>void document.exitFullscreen();
-    document.addEventListener('fullscreenchange',()=>{byId('screenExitFullscreen').hidden=document.fullscreenElement!==byId('screenStage');});
+    byId('screenFullscreen').onclick=()=>void fullscreen();
+    document.addEventListener('fullscreenchange',()=>{const active=document.fullscreenElement===stage;byId('screenFullscreen').setAttribute('aria-pressed',String(active));byId('screenFullscreen').setAttribute('aria-label',active?'退出全屏':'全屏观看');byId('screenFullscreen').title=active?'退出全屏（Esc）':'全屏观看（F）';});
     byId('screenFit').onclick=()=>{const cover=byId('screenVideo').style.objectFit==='cover';byId('screenVideo').style.objectFit=cover?'contain':'cover';byId('screenFit').textContent=cover?'填满画面':'适应窗口';};
     this.render();
   }
@@ -62,7 +65,7 @@ export class ScreenView{
     const s=this.state,own=!!s.owner&&s.self,other=!!s.owner&&!own,ready=this.joined&&s.supported;
     byId('screenPanel').classList.toggle('hasShare',!!s.owner);
     byId('screenStage').hidden=!s.owner||!!this.collapsed;byId('screenCollapse').hidden=!s.owner;byId('screenCollapse').textContent=this.collapsed?'展开预览':'收起预览';
-    if(!s.owner){this.collapsed=false;byId('screenPanel').classList.remove('screenExpanded');byId('screenExpand').textContent='放大画面';}
+    if(!s.owner){this.collapsed=false;byId('screenPanel').classList.remove('screenExpanded');}
     const statusKey=!this.joined?'offline':!s.supported?'unsupported':s.session||'idle';if(this.statusKey!==statusKey){this.statusKey=statusKey;this.message='';}
     const compatible=typeof globalThis.RTCPeerConnection==='function',capture=!!navigator.mediaDevices?.getDisplayMedia;
     byId('screenStart').disabled=!ready||!!s.owner||s.selecting||!compatible||!capture;byId('screenStart').textContent=s.selecting?'正在选择画面…':'共享软件窗口／桌面';
@@ -80,7 +83,7 @@ export class ScreenView{
     byId('screenOverlay').hidden=!placeholder;
     byId('screenOverlayTitle').textContent=!s.owner?'把画面分享给房间里的朋友':s.paused?'共享已暂停':other&&!s.watching?'你已停止观看':'正在连接画面…';
     byId('screenOverlayDetail').textContent=!s.owner?'选择软件窗口或显示器，朋友无需重新加入房间。':s.paused?'恢复共享后继续观看，声音由独立开关控制。':other&&!s.watching?'语音和音乐仍可继续，随时点击“观看画面”。':'网络连通后自动显示；你可以继续讲话和听音乐。';
-    for(const id of ['screenExpand','screenFullscreen','screenFit'])byId(id).disabled=!s.owner;
+    for(const id of ['screenFullscreen','screenFit'])byId(id).disabled=!s.owner;
     const baseline=!this.joined?'进入房间后可以共享或观看画面。':!s.supported?'正在读取屏幕共享能力；旧版房间服务需要升级后才可共享。':!compatible?'此浏览器不支持实时视频，请使用新版 Edge 或 Chrome。':!s.owner?'尚无人共享。每次开始或更换来源，都由你在系统选择器中确认。':'正在连接画面…';
     byId('screenStatus').textContent=this.message||baseline;
     byId('screenRelay').textContent=ready?(s.relayAvailable?'支持跨网直连和服务器中继':'当前仅可尝试直连；公共屏幕中继尚未启用'):'';

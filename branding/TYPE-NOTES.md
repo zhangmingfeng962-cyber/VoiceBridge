@@ -1,0 +1,1 @@
+Wordmark: Segoe UI Semibold from the local Windows installation, converted to SVG paths for static brand artwork. No font file is redistributed. The application itself continues to use local system fonts. Logo symbol is original geometric path construction.

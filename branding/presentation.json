@@ -1,0 +1,51 @@
+{
+  "brand": "VoiceBridge",
+  "tagline": "一起听，一起聊",
+  "brief": "游戏连麦与独立音乐共享房间。用户已选定 A 同频桥。",
+  "adjectives": [
+    "同频",
+    "友好",
+    "清楚",
+    "克制"
+  ],
+  "criteria": "软件、托盘和标签页小尺寸可辨；黑白均可用。",
+  "industry": "consumer-app",
+  "mockups": [
+    "app-icon",
+    "website",
+    "favicon-tab",
+    "sticker",
+    "social",
+    "business-card"
+  ],
+  "nav": [
+    "房间大厅",
+    "个人资料",
+    "下载软件"
+  ],
+  "brand_color": "#80C9D5",
+  "greyscale": false,
+  "designer": "VoiceBridge",
+  "round": 2,
+  "concepts": [
+    {
+      "name": "同频桥 · 已选定",
+      "symbol": "voicebridge-symbol.svg",
+      "lockup": "voicebridge-horizontal.svg",
+      "symbol_on_tile": "voicebridge-app-icon.svg",
+      "lockup_on_dark": "voicebridge-horizontal.svg",
+      "tile_color": "#111111",
+      "idea": "两路声音连成一座桥。",
+      "rationale": [
+        "连续声带表达语音与音乐的连接",
+        "单一轮廓适合浏览器标签页与托盘",
+        "沿用黑色界面与青色强调色"
+      ]
+    }
+  ],
+  "recommendation": "已由用户选定。软件与网页统一使用该方向。",
+  "next_steps": [
+    "统一资源已接入开发版",
+    "继续界面与功能验证"
+  ]
+}

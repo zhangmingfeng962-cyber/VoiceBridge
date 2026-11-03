@@ -4,7 +4,7 @@
  <Style TargetType="Window"><Setter Property="FontFamily" Value="Microsoft YaHei UI, Segoe UI"/><Setter Property="FontSize" Value="14"/><Setter Property="Foreground" Value="#F5F5F2"/><Setter Property="Background" Value="Black"/></Style>
  <Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/></Style>
  <Style x:Key="Muted" TargetType="TextBlock"><Setter Property="Foreground" Value="#B8B8B8"/><Setter Property="FontSize" Value="12"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
- <Style TargetType="Button">
+ <Style TargetType="Button"><EventSetter Event="PreviewMouseLeftButtonDown" Handler="ButtonPress"/><EventSetter Event="PreviewMouseLeftButtonUp" Handler="ButtonRelease"/><EventSetter Event="MouseLeave" Handler="ButtonRelease"/>
   <Setter Property="Padding" Value="14,8"/><Setter Property="MinHeight" Value="36"/><Setter Property="Margin" Value="0,0,8,0"/><Setter Property="Background" Value="#2A2A2A"/><Setter Property="Foreground" Value="#F5F5F2"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="BorderThickness" Value="2"/><Setter Property="Cursor" Value="Hand"/>
   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
    <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="20" Padding="{TemplateBinding Padding}">

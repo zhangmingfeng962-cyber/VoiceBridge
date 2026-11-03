@@ -1,5 +1,6 @@
 class RoomMixer extends AudioWorkletProcessor{
   constructor(){super();this.streams=new Map();this.master=1;this.auto=true;this.ticks=0;this.decoded=0;this.port.onmessage=({data:m})=>{
+    if(m.type==='runtimePort'){m.port.onmessage=this.port.onmessage;m.port.start();return;}
     if(m.type==='master')this.master=m.value;
     if(m.type==='auto')this.auto=m.value;
     if(m.type==='remove'){for(const key of this.streams.keys())if(key.startsWith(m.id+':'))this.streams.delete(key);}
@@ -28,11 +29,11 @@ class RoomMixer extends AudioWorkletProcessor{
   }
 }
 class RoomCapture extends AudioWorkletProcessor{
-  constructor(options){super();this.channels=options.processorOptions.channels;this.buffer=new Float32Array(960*this.channels);this.used=0;this.enabled=false;this.gain=1;this.epoch=0;this.port.onmessage=({data:m})=>{this.enabled=m.enabled;this.gain=m.gain;this.epoch=m.epoch;this.used=0;};}
+  constructor(options){super();this.channels=options.processorOptions.channels;this.buffer=new Float32Array(960*this.channels);this.used=0;this.enabled=false;this.gain=1;this.epoch=0;this.port.onmessage=({data:m})=>{if(m.type==='runtimePort'){this.packetPort=m.port;return;}this.enabled=m.enabled;this.gain=m.gain;this.epoch=m.epoch;this.used=0;};}
   process(inputs,outputs){for(const channel of outputs[0])channel.fill(0);const source=inputs[0];if(!this.enabled||!source?.length)return true;
     for(let n=0;n<source[0].length;n++){
       for(let c=0;c<this.channels;c++){let value=this.channels===1?source.reduce((sum,ch)=>sum+ch[n],0)/source.length:source[Math.min(c,source.length-1)][n];value*=this.gain;this.buffer[this.used*this.channels+c]=Math.max(-.98,Math.min(.98,Number.isFinite(value)?value:0));}
-      if(++this.used===960){const pcm=this.buffer.buffer;this.port.postMessage({pcm,epoch:this.epoch},[pcm]);this.buffer=new Float32Array(960*this.channels);this.used=0;}
+      if(++this.used===960){const pcm=this.buffer.buffer;(this.packetPort||this.port).postMessage({pcm,epoch:this.epoch},[pcm]);this.buffer=new Float32Array(960*this.channels);this.used=0;}
     }return true;
   }
 }

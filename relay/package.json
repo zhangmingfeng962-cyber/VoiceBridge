@@ -11,6 +11,7 @@
     "test:browser": "node tests/browser/fixture.mjs"
   },
   "dependencies": {
+    "pngjs": "7.0.0",
     "ws": "8.22.0"
   }
 }

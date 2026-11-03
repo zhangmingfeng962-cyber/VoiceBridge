@@ -1,3 +1,5 @@
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
@@ -8,6 +10,10 @@ public sealed class MemberRow(RoomMember member, bool self, bool canKick, Action
     private float voice = 100, music = 100, peak;
     private string status = "";
     public string Id => member.Id;
+    public ImageSource? Avatar {get;}=CreateAvatar(member.AvatarUrl);
+    public Visibility AvatarVisibility=>Avatar is null?Visibility.Collapsed:Visibility.Visible;
+    public Visibility InitialVisibility=>Avatar is null?Visibility.Visible:Visibility.Collapsed;
+    private static ImageSource? CreateAvatar(string? value){if(value is null||!System.Text.RegularExpressions.Regex.IsMatch(value,@"^/avatars/[a-f0-9]{64}\.png$"))return null;try{return new BitmapImage(new Uri(RoomService.DefaultOrigin+value));}catch{return null;}}
     public string Initial => string.IsNullOrEmpty(member.Name) ? "友" : System.Globalization.StringInfo.GetNextTextElement(member.Name);
     public string DisplayName => member.Name + (self ? "（你）" : "");
     public Visibility GainVisibility => self ? Visibility.Collapsed : Visibility.Visible;

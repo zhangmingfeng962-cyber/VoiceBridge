@@ -7,6 +7,7 @@ public sealed record ProfileSettings
 {
     public int Version { get; init; } = 1;
     public string Nickname { get; init; } = "朋友";
+    public bool CloseToTray { get; init; } = true;
     public bool NoiseSuppression { get; init; } = true;
     public float MicrophoneGain { get; init; } = 100;
     public float SpeakerGain { get; init; } = 100;

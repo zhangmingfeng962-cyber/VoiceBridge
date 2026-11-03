@@ -1,10 +1,11 @@
+using VoiceBridge.App.Accounts;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
 using VoiceBridge.Core;
 namespace VoiceBridge.App.Room;
 public sealed record LobbyRoom(string Id, string Name, string OwnerName, int Count, int Capacity, bool Public, string? OwnerId);
-public sealed record RoomMember(string Id, string Name, bool Desktop, bool Connected, bool Microphone, bool Music, string Source);
+public sealed record RoomMember(string Id, string Name, bool Desktop, bool Connected, bool Microphone, bool Music, string Source, string? UserId=null, string? AvatarUrl=null, string? ShortId=null);
 public static class LobbyClient
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(12) };
@@ -17,7 +18,9 @@ public static class LobbyClient
     {
         if (!RoomCipher.IsHex(id, 32)) throw new ArgumentException("房间编号无效");
         origin ??= RoomService.DefaultOrigin;
-        using var response = await Http.PostAsync(origin + "/api/lobby/rooms/" + id + "/join", new StringContent("{}"), token);
+        using var request=new HttpRequestMessage(HttpMethod.Post,origin+"/api/lobby/rooms/"+id+"/join"){Content=new StringContent("{}")};
+        if(origin==RoomService.DefaultOrigin&&AccountClient.Current.Bearer is {} bearer)request.Headers.Authorization=new("Bearer",bearer);
+        using var response=await Http.SendAsync(request,token);
         if ((int)response.StatusCode == 404) throw new InvalidOperationException("房间已关闭或不再公开");
         if ((int)response.StatusCode == 409) throw new InvalidOperationException("房间已满，请稍后重试");
         response.EnsureSuccessStatusCode(); using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token)); var root = json.RootElement;

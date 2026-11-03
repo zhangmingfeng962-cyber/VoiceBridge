@@ -5,11 +5,11 @@ $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if(!$OutputDirectory){$OutputDirectory=Join-Path $root 'artifacts/packages'}
 $output=[IO.Path]::GetFullPath($OutputDirectory)
 [IO.Directory]::CreateDirectory($output)|Out-Null
-$version='0.12.0'
+$version='0.13.0'
 $staging=Join-Path $output ('source-'+[Guid]::NewGuid().ToString('N'))
 $source=Join-Path $staging 'VoiceBridge'
 [IO.Directory]::CreateDirectory($source)|Out-Null
-$allowed=@('.gitattributes','.gitignore','.github','CHANGELOG.md','Directory.Build.props','global.json','LICENSE','README.md','VoiceBridge.sln','src','tests','scripts','third-party','docs','relay')
+$allowed=@('.gitattributes','.gitignore','.github','CHANGELOG.md','Directory.Build.props','global.json','LICENSE','README.md','VoiceBridge.sln','src','tests','scripts','third-party','docs','relay','branding')
 $count=0
 foreach($file in Get-ChildItem -LiteralPath $root -Recurse -File -Force){
   $relative=[IO.Path]::GetRelativePath($root,$file.FullName).Replace('\','/')
