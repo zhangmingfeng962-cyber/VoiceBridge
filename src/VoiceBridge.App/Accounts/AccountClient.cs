@@ -17,6 +17,7 @@ public sealed class AccountClient
  private readonly HttpClient http;
  private readonly string file;
  private readonly SemaphoreSlim gate=new(1);
+ private long identityRevision;
  public AccountSession? Session {get;private set;}
  public AccountProfile? User=>Session?.User;
  public string? Bearer=>Session?.Token;
@@ -24,7 +25,7 @@ public sealed class AccountClient
  public event Action? Changed;
  public AccountClient():this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),"VoiceBridge","account.bin"),new HttpClient{BaseAddress=new(RoomService.DefaultOrigin),Timeout=TimeSpan.FromSeconds(25)}){}
  internal AccountClient(string storageFile,HttpClient client){file=storageFile;http=client;http.DefaultRequestHeaders.Add("X-VoiceBridge-Client","desktop");try{if(File.Exists(file)&&new FileInfo(file).Length<32768)Session=JsonSerializer.Deserialize<AccountSession>(UserSecret.Unprotect(File.ReadAllBytes(file)),RoomCipher.JsonOptions);}catch{Session=null;}}
- private void Save(){try{Directory.CreateDirectory(Path.GetDirectoryName(file)!);var temp=file+".tmp";File.WriteAllBytes(temp,UserSecret.Protect(JsonSerializer.SerializeToUtf8Bytes(Session,RoomCipher.JsonOptions)));File.Move(temp,file,true);}catch(IOException){}catch(UnauthorizedAccessException){}Changed?.Invoke();}
+ private void Save(){try{Directory.CreateDirectory(Path.GetDirectoryName(file)!);var temp=file+".tmp";if(Session is null){File.Delete(file);File.Delete(temp);}else{File.WriteAllBytes(temp,UserSecret.Protect(JsonSerializer.SerializeToUtf8Bytes(Session,RoomCipher.JsonOptions)));File.Move(temp,file,true);}}catch(IOException){}catch(UnauthorizedAccessException){}Changed?.Invoke();}
  public async Task<JsonElement> RequestAsync(string route,object? body=null,HttpMethod? method=null,bool authenticated=true)
  {
   using var request=new HttpRequestMessage(method??HttpMethod.Post,route);
@@ -36,14 +37,14 @@ public sealed class AccountClient
  }
  public async Task<bool> RestoreAsync()
  {
-  if(Session is null)return false;await gate.WaitAsync();try{using var request=new HttpRequestMessage(HttpMethod.Post,"/api/auth/refresh"){Content=JsonContent.Create(new{})};request.Headers.Authorization=new("Bearer",Session.Token);using var response=await http.SendAsync(request);if(response.StatusCode==System.Net.HttpStatusCode.Unauthorized){Session=null;Save();return false;}response.EnsureSuccessStatusCode();Session=await response.Content.ReadFromJsonAsync<AccountSession>(RoomCipher.JsonOptions);Save();return Session is not null;}catch(HttpRequestException){return false;}catch(TaskCanceledException){return false;}finally{gate.Release();}
+  if(Session is null)return false;await gate.WaitAsync();try{if(Session is not {} current)return false;long revision=Volatile.Read(ref identityRevision);using var request=new HttpRequestMessage(HttpMethod.Post,"/api/auth/refresh"){Content=JsonContent.Create(new{})};request.Headers.Authorization=new("Bearer",current.Token);using var response=await http.SendAsync(request);if(revision!=Volatile.Read(ref identityRevision)||Session?.Token!=current.Token)return Session is not null;if(response.StatusCode==System.Net.HttpStatusCode.Unauthorized){Interlocked.Increment(ref identityRevision);Session=null;Save();return false;}response.EnsureSuccessStatusCode();var restored=await response.Content.ReadFromJsonAsync<AccountSession>(RoomCipher.JsonOptions);if(revision!=Volatile.Read(ref identityRevision)||Session?.Token!=current.Token)return Session is not null;if(restored is null)return false;Session=restored;Save();return true;}catch(HttpRequestException){return false;}catch(TaskCanceledException){return false;}catch(JsonException){return false;}finally{gate.Release();}
  }
- public async Task SignInAsync(string address,string password){var data=await RequestAsync("/api/auth/login",new{address,password},authenticated:false);Session=data.Deserialize<AccountSession>(RoomCipher.JsonOptions);Save();}
+ public async Task SignInAsync(string address,string password){long revision=Interlocked.Increment(ref identityRevision);var data=await RequestAsync("/api/auth/login",new{address,password},authenticated:false);if(revision!=Volatile.Read(ref identityRevision))return;Session=data.Deserialize<AccountSession>(RoomCipher.JsonOptions);Save();}
  public async Task<string> VerifyAsync(string address,string code,string purpose){var data=await RequestAsync("/api/auth/verify",new{address,code,purpose},authenticated:false);return data.GetProperty("verificationToken").GetString()!;}
- public async Task RegisterAsync(string verificationToken,string password,string nickname){var data=await RequestAsync("/api/auth/register",new{verificationToken,password,nickname},authenticated:false);Session=data.Deserialize<AccountSession>(RoomCipher.JsonOptions);Save();}
- public async Task UpdateProfileAsync(string nickname){var data=await RequestAsync("/api/me",new{nickname},HttpMethod.Patch);if(Session is {} current){Session=current with{User=data.GetProperty("user").Deserialize<AccountProfile>(RoomCipher.JsonOptions)!};Save();}}
- public async Task UploadAvatarAsync(byte[] png){var data=await RequestAsync("/api/me/avatar",new{png=Convert.ToBase64String(png)});if(Session is {} current){Session=current with{User=data.GetProperty("user").Deserialize<AccountProfile>(RoomCipher.JsonOptions)!};Save();}}
- public async Task LogoutAsync(){try{await RequestAsync("/api/auth/logout");}finally{Session=null;Save();}}
+ public async Task RegisterAsync(string verificationToken,string password,string nickname){long revision=Interlocked.Increment(ref identityRevision);var data=await RequestAsync("/api/auth/register",new{verificationToken,password,nickname},authenticated:false);if(revision!=Volatile.Read(ref identityRevision))return;Session=data.Deserialize<AccountSession>(RoomCipher.JsonOptions);Save();}
+ public async Task UpdateProfileAsync(string nickname){var selected=Session;long revision=Interlocked.Increment(ref identityRevision);var data=await RequestAsync("/api/me",new{nickname},HttpMethod.Patch);if(Session is {} current&&current.Token==selected?.Token&&revision==Volatile.Read(ref identityRevision)){Session=current with{User=data.GetProperty("user").Deserialize<AccountProfile>(RoomCipher.JsonOptions)!};Save();}}
+ public async Task UploadAvatarAsync(byte[] png){var selected=Session;long revision=Interlocked.Increment(ref identityRevision);var data=await RequestAsync("/api/me/avatar",new{png=Convert.ToBase64String(png)});if(Session is {} current&&current.Token==selected?.Token&&revision==Volatile.Read(ref identityRevision)){Session=current with{User=data.GetProperty("user").Deserialize<AccountProfile>(RoomCipher.JsonOptions)!};Save();}}
+ public async Task LogoutAsync(){var selected=Session;Interlocked.Increment(ref identityRevision);Session=null;Save();if(selected is null)return;try{using var request=new HttpRequestMessage(HttpMethod.Post,"/api/auth/logout"){Content=JsonContent.Create(new{})};request.Headers.Authorization=new("Bearer",selected.Token);using var response=await http.SendAsync(request);response.EnsureSuccessStatusCode();}catch(HttpRequestException){}catch(TaskCanceledException){}}
  public async Task<string> DesktopTicketAsync(RoomClient room){var result=await RequestAsync("/api/auth/desktop-ticket",new{roomId=room.Invite.RoomId,memberId=room.MemberId});return result.GetProperty("ticket").GetString()!;}
 }
 // Current-user Windows DPAPI; no plaintext password or reusable credential in preferences.json.

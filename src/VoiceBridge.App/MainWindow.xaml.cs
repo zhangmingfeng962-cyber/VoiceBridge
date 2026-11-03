@@ -45,7 +45,7 @@ public partial class MainWindow : Window
             if (DateTime.UtcNow >= nextUpdate) { nextUpdate = DateTime.UtcNow.AddHours(6); _ = updates.CheckAsync();if(account.User is not null)_=account.RestoreAsync(); }
         };
         timer.Start(); RefreshRoom();
-        account.Changed+=()=>Dispatcher.BeginInvoke(()=>{if(account.User is {} user){NicknameBox.Text=user.Nickname;AccountButton.Content="个人资料 · "+user.Nickname;profile.Save(profile.Read() with{Nickname=user.Nickname});}else AccountButton.Content="登录 / 注册";});
+        account.Changed+=()=>Dispatcher.BeginInvoke(()=>{if(account.User is {} user){NicknameBox.Text=user.Nickname;AccountButton.Content="个人资料 · "+user.Nickname;profile.Save(profile.Read() with{Nickname=user.Nickname});}else{AccountButton.Content="登录 / 注册";if(room is not null)_=LeaveAsync(false);}});
         if(settings is null)Loaded+=async(_,_)=>{signingIn=true;try{if(await account.RestoreAsync()){NicknameBox.Text=account.User!.Nickname;AccountButton.Content="个人资料 · "+account.User.Nickname;}else new AccountWindow(accountClient:account){Owner=this}.ShowDialog();}finally{signingIn=false;}if(account.User is not null&&pendingInvite is {} invitation){pendingInvite=null;await JoinTargetAsync(invitation);}};
     }
     public async Task EnterAccountFixtureAsync(RoomInvite invite)
