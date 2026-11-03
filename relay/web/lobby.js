@@ -1,5 +1,6 @@
-export async function getRooms(){const response=await fetch('/api/lobby/rooms',{cache:'no-store'});if(!response.ok)throw Error('大厅暂时无法刷新');return (await response.json()).rooms;}
-export async function publicAdmission(id){const response=await fetch('/api/lobby/rooms/'+id+'/join',{method:'POST',body:'{}',headers:{'Content-Type':'application/json'}});if(!response.ok)throw Error(response.status===409?'房间已满，请稍后重试':'房间已关闭或不再公开');return response.json();}
+export async function roomRequest(route,options={}){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),5000);try{const response=await fetch(route,{...options,signal:controller.signal}),data=await response.json();return {ok:response.ok,status:response.status,data};}catch(error){if(controller.signal.aborted)throw Error('网络响应超时，请稍后重试');throw error;}finally{clearTimeout(timer);}}
+export async function getRooms(){const response=await roomRequest('/api/lobby/rooms',{cache:'no-store'});if(!response.ok)throw Error('大厅暂时无法刷新');if(!Array.isArray(response.data.rooms))throw Error('大厅返回异常，请稍后刷新');return response.data.rooms;}
+export async function publicAdmission(id){const response=await roomRequest('/api/lobby/rooms/'+id+'/join',{method:'POST',body:'{}',headers:{'Content-Type':'application/json'}});if(!response.ok)throw Error(response.status===409?'房间已满，请稍后重试':'房间已关闭或不再公开');return response.data;}
 export function publicLink(id){return location.origin+'/rooms/'+id;}
 export function renderRooms(container,rooms,onJoin){
  container.replaceChildren();

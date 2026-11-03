@@ -27,3 +27,15 @@ test('application pong detects one-way failure even when WebSocket protocol pong
 });
 
 test('initial room join is completed by worker without waiting for a UI open callback',async()=>{const f=await setup(true);try{assert.ok(f.welcome.id);assert.equal(f.service.peers.size,1);}finally{await f.close();}});
+
+test('expired public resume obtains a fresh admission without reopening microphone',async()=>{
+ const service=await startServer({port:0,host:'127.0.0.1',publishKeyHash:hash,publicRooms:true});let host,worker;
+ try{
+  const room=await(await fetch(service.url+'/api/rooms',{method:'POST',headers:{Authorization:'Bearer '+'1'.repeat(64)},body:JSON.stringify({public:true,publicKey:key})})).json();
+  host=new WebSocket(service.url.replace('http:','ws:')+'/api/rooms/'+room.id+'/voice',{origin:service.url});const joined=once(host,'message');await once(host,'open');host.send(JSON.stringify({type:'join',version:4,role:'browser',token:room.listenToken,hostToken:room.writeToken,name:'host'}));await joined;
+  worker=new Worker(new URL('./runtime-host.mjs',import.meta.url),{workerData:{origin:service.url}});await once(worker,'message');
+  const welcome=new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Fresh public admission timed out')),7000);worker.on('message',m=>{if(m.type==='message'){const message=JSON.parse(m.data);if(message.type==='welcome'){clearTimeout(timer);resolve(message);}}});});
+  worker.postMessage({type:'connect',url:service.url.replace('http:','ws:')+'/api/rooms/'+room.id+'/voice',roomId:room.id,key,role:'browser',join:{type:'join',version:4,role:'browser',knownPublicRoom:true,token:'f'.repeat(64),resume:{memberId:'e'.repeat(32),token:'d'.repeat(64)},canResume:true,name:'recovered'}});
+  const restored=await welcome;assert.ok(restored.id);assert.notEqual(restored.id,'e'.repeat(32));assert.equal(service.peers.size,2);assert.equal(service.peers.get(restored.id).microphone,false);
+ }finally{host?.terminate();await worker?.terminate();await service.stop();}
+});

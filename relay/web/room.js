@@ -7,6 +7,7 @@ import {ScreenView} from './screen-view.js';
 import {readPreferences,savePreferences,cleanNickname} from './preferences.js';
 import {getRooms,renderRooms,publicAdmission,publicLink} from './lobby.js';
 import {openRoom} from './open-room.js';
+import {readRecovery,saveRecovery} from './room-recovery.js';
 const el=id=>document.getElementById(id),room=location.pathname.match(/^\/rooms?\/([a-f0-9]{32})$/)?.[1],parts=location.hash.slice(1).split('.');
 let token=parts[0],key=parts[1],cipher=room&&/^[a-f0-9]{64}$/.test(parts[1]||'')?new RoomCrypto(room,parts[1]):null;
 const paired=parts[2]==='desktop',nativeId=parts[3],controlToken=parts[4],publicEntry=location.pathname.startsWith('/rooms/');
@@ -19,13 +20,13 @@ const cards=new Map(),lastReceived=new Map();
 const runtime=new RoomRuntime();runtime.onnotice=message=>text(message);
 let restoredMicrophone=true,accountId=null,lastSpeakerGain=100;const accountChannel=window.BroadcastChannel?new BroadcastChannel('voicebridge.account'):null;if(accountChannel)accountChannel.onmessage=event=>{if(!paired&&accountId&&event.data?.userId!==accountId)void leave('登录账号已变化，请重新进入房间',true);};
 const resumeStorage='voicebridge.resume:'+room;
-function saveResume(){if(!paired&&memberResume)try{sessionStorage.setItem(resumeStorage,JSON.stringify({value:memberResume,at:Date.now(),microphone:options.microphone}));}catch{}}
+function saveResume(){if(!paired&&memberResume)try{saveRecovery(sessionStorage,resumeStorage,accountId,memberResume,options,{token,key});}catch{}}
 const channel=window.BroadcastChannel&&room?new BroadcastChannel('voicebridge-room:'+room):null;
 const text=message=>{el('status').textContent=message;};
 const keyName=code=>code>=65&&code<=90?String.fromCharCode(code):code>=48&&code<=57?String.fromCharCode(code):code>=112&&code<=135?'F'+(code-111):({32:'空格',16:'Shift',17:'Ctrl',18:'Alt',9:'Tab'})[code]||'键 '+code;
 const simpleInvite=()=>(roomInfo?roomInfo.public:publicEntry)?publicLink(room):location.origin+'/room/'+room+'#'+token+'.'+key;
 const controlIds=['microphone','noiseSuppression','talkMode','bindKey','micDevice','outputDevice','micGain','micDown','micUp','speakerToggle','speakerGain','speakerDown','speakerUp','sourceSelect','share','shareTab','musicGain','autoBuffer'];
-let memberResume=null,reconnectTimer,heartbeat,wireEpoch=0,recoveryStarted=0,retryCount=0,restoreController=false;
+let memberResume=null,reconnectTimer,heartbeat,wireEpoch=0,recoveryStarted=0,retryCount=0,restoreController=false,skipMembershipCue=false;
 const connectionState=(message,warn=false)=>{el('connectionBadge').textContent=message;el('connectionBadge').classList.toggle('warn',warn);};
 let lastUnderruns=0,audioPressureUntil=0;
 const screenView=new ScreenView({
@@ -84,17 +85,21 @@ async function handleState(message,current,connection=connectionId){if(connectio
   choices('micDevice',state.microphones,options.microphoneId,'系统默认麦克风');choices('outputDevice',state.outputs,options.outputId,'默认听音设备');choices('sourceSelect',state.sources,options.sourceId,'选择一个发声程序');el('micLevel').style.width=Math.min(100,state.microphonePeak*100)+'%';el('overload').hidden=state.speakerPeak<=1&&state.microphonePeak<=1;el('sourceStatus').textContent=state.status;network(state.streams||[]);el('sourceHint').textContent='本机检测到 '+state.sources.length+' 个音源，列表每两秒更新。只共享你选择的程序。';
   screenView.syncSound();
 }
-let pendingNickname=null;
+let pendingNickname=null,joining=false;
 export async function join(){
-  if(joined||socket)return;
+  if(joined||socket||joining)return;joining=true;el('join').disabled=true;
+  try{
   if(!paired||!parts.includes('embedded')){try{const user=await currentUser();accountId=user.id;el('nickname').value=user.nickname;}catch(error){if(error.status===401){loginRedirect();return;}text(error.message);return;}}
+  let recovery=null;try{if(!paired)recovery=readRecovery(sessionStorage,resumeStorage,accountId);}catch{}
+  if(recovery){options={...options,...recovery.options,microphone:false,sharing:false};if(!cipher&&recovery.admission){token=recovery.admission.token;key=recovery.admission.key;cipher=new RoomCrypto(room,key);}refreshControls();}
   if(publicEntry&&!cipher){try{const admission=await publicAdmission(room);token=admission.token;key=admission.key;cipher=new RoomCrypto(room,key);}catch(error){text(error.message);return;}}
   if(!room||!cipher||!/^[a-f0-9]{64}$/.test(token||'')){text('请打开完整的房间邀请');return;}
-  const current=++epoch;seenMembers=false;recoveryStarted=0;retryCount=0;memberResume=null;restoredMicrophone=true;try{const saved=JSON.parse(sessionStorage.getItem(resumeStorage)||'null');if(saved&&Date.now()-saved.at<90000){memberResume=saved.value;restoredMicrophone=saved.microphone!==false;}}catch{}el('join').disabled=true;connectionState('正在连接');text('正在进入音乐房间，入房后自动开启麦克风…');
+  const current=++epoch;seenMembers=false;recoveryStarted=0;retryCount=0;memberResume=recovery?.value||null;restoredMicrophone=recovery?recovery.microphone:true;el('join').disabled=true;connectionState('正在连接');text(recovery?'正在恢复房间与声音设置…':'正在进入音乐房间，入房后自动开启麦克风…');
   try{
-    if(!paired){audio=new BrowserAudio(sendAudio,data=>network(data.streams,data.decoded),message=>{text(message);options.microphone=!!audio?.capture[0]&&audio.options.microphone;if(!audio?.capture[1])options.sharing=false;refreshControls();sendFlags();},runtime);audio.options={...audio.options,...options};await audio.start();}
+    if(!paired){audio=new BrowserAudio(sendAudio,data=>network(data.streams,data.decoded),message=>{text(message);options.microphone=!!audio?.capture[0]&&audio.options.microphone;if(!audio?.capture[1])options.sharing=false;refreshControls();sendFlags();},runtime);audio.onPlaybackBlocked=blocked=>{el('resumeAudio').hidden=!blocked;if(blocked)text('浏览器暂停了音频，点击“恢复浏览器声音”继续；关麦选择会保留。');};audio.options={...audio.options,...options};await audio.start();}
     if(current!==epoch)return;openSocket(current);
   }catch(error){if(current===epoch)await leave(error.message||'无法开启房间音频');}
+  }finally{joining=false;if(!joined&&!socket)el('join').disabled=false;}
 }
 function networkLost(ws,code=1006){
   if(socket!==ws)return;ws.cleanup?.();socket=null;wireEpoch++;ws.onclose=null;ws.onmessage=null;try{ws.close(4008,'Reconnecting');}catch{}
@@ -108,7 +113,7 @@ function networkLost(ws,code=1006){
 }
 function openSocket(current){
   if(current!==epoch)return;
-  const request=paired?{type:'join',version:4,role:'controller',memberId:nativeId,controlToken}:{type:'join',version:4,role:'browser',token,name:cleanNickname(el('nickname').value)||'朋友',hostToken:sessionStorage.getItem('voicebridge-owner:'+room),canResume:true,...(memberResume?{resume:memberResume}:{})};
+  const request=paired?{type:'join',version:4,role:'controller',memberId:nativeId,controlToken}:{type:'join',version:4,role:'browser',knownPublicRoom:publicEntry||!!roomInfo?.public,token,name:cleanNickname(el('nickname').value)||'朋友',hostToken:sessionStorage.getItem('voicebridge-owner:'+room),canResume:true,...(memberResume?{resume:memberResume}:{})};
   const ws=new RuntimeSocket((location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/api/rooms/'+room+'/voice',runtime,room,key,paired?'controller':'browser',parts.includes('embedded'),request);socket=ws;ws.binaryType='arraybuffer';let pending=0,lastSeen=Date.now();
   const timeout=setTimeout(()=>networkLost(ws),15000);
   ws.cleanup=()=>{clearTimeout(timeout);};
@@ -120,7 +125,7 @@ function openSocket(current){
     if(event.data instanceof ArrayBuffer){if(paired||pending>=24)return;pending++;const wire=wireEpoch;receiving=receiving.then(async()=>{const frame=await cipher.openAudio(event.data);if(current!==epoch||wire!==wireEpoch||frame.id===selfId||!roster.some(m=>m.id===frame.id))return;const identity=frame.id+':'+frame.kind;if(frame.sequence<=(lastReceived.get(identity)??-1))return;lastReceived.set(identity,frame.sequence);audio?.receive(frame);}).catch(()=>text('有一路音频未能解密，请确认完整邀请来自同一房间')).finally(()=>pending--);return;}
     let message;try{message=JSON.parse(event.data);}catch{return;}
     if(message.type==='welcome'){
-      clearTimeout(timeout);sessionStorage.removeItem('voicebridge-owner:'+room);const wasJoined=joined;joined=true;selfId=message.id;
+      clearTimeout(timeout);sessionStorage.removeItem('voicebridge-owner:'+room);const wasJoined=joined;skipMembershipCue=message.resumed===true;joined=true;selfId=message.id;
       if(message.resumeToken)memberResume={memberId:selfId,token:message.resumeToken};
       if(paired){connectionId=message.connectionId;stateSequence=-1;controlSequence=0;revision=pendingRevision=0;nativeReady=false;}
       retryCount=0;recoveryStarted=0;enabled(true);audio?.setNetworkConnected(true);refreshControls();
@@ -135,7 +140,7 @@ function openSocket(current){
     if(message.type==='room:error')text(message.error);if(message.type==='invitation')token=message.token;
     if(message.type==='desktopConnection'){connectionState(message.connected?'已连接':'客户端正在重连',!message.connected);if(!message.connected)text('Windows 客户端正在重连，音量与开关仍可调整；恢复后同步最新选择。');}
     if(typeof message.type==='string'&&message.type.startsWith('screen:'))void screenView.receive(message);
-    if(message.type==='members'){if(!paired)for(const cue of membershipCues(roster,message.members,seenMembers))audio?.notify(cue);seenMembers=true;roster=message.members;members();}
+    if(message.type==='members'){if(!paired&&!skipMembershipCue)for(const cue of membershipCues(roster,message.members,seenMembers))audio?.notify(cue);skipMembershipCue=false;seenMembers=true;roster=message.members;members();}
     if(message.type==='state'&&paired){const connection=connectionId;receiving=receiving.then(()=>handleState(message,current,connection)).catch(()=>text('本机控制状态解密失败，请从客户端重新打开控制页'));}
   };
   ws.onclose=event=>{ws.cleanup();if(current===epoch)networkLost(ws,event.code);};
@@ -146,7 +151,7 @@ async function leave(message='已退出房间',explicit=false){
   if(explicit&&paired&&joined&&socket?.readyState===WebSocket.OPEN){try{socket.send(JSON.stringify(await cipher.sealControl(selfId,connectionId,controlSequence++,{action:'leave'})));}catch{}}
   screenView.leave();epoch++;wireEpoch++;micRequest++;nativeReady=false;restoreController=false;joined=false;seenMembers=false;lastUnderruns=0;audioPressureUntil=0;clearTimeout(updateTimer);
   const old=socket;socket=null;if(old){old.cleanup?.();old.onclose=null;if(!paired&&old.readyState===WebSocket.OPEN)old.send(JSON.stringify({type:'leave'}));old.close();}
-  const oldAudio=audio;audio=null;if(oldAudio)await oldAudio.stop();options={...options,microphone:false,sharing:false};roster=[];members();selfId=null;lastReceived.clear();enabled(false);el('nickname').disabled=false;refreshControls();connectionState('尚未连接');text(message);
+  const oldAudio=audio;audio=null;if(oldAudio)await oldAudio.stop();el('resumeAudio').hidden=true;options={...options,microphone:false,sharing:false};roster=[];members();selfId=null;lastReceived.clear();enabled(false);el('nickname').disabled=false;refreshControls();connectionState('尚未连接');text(message);
 }
 async function refreshMicrophones(){if(paired||!audio)return;try{const devices=await audio.inputs();choices('micDevice',devices.map(d=>({id:d.deviceId,name:d.label||'麦克风（开启权限后显示名称）'})),options.microphoneId,'系统默认麦克风');}catch{}}
 el('join').addEventListener('click',()=>void join());el('leave').addEventListener('click',()=>void leave('已退出房间',true));el('invite').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(simpleInvite());text('入房邀请已复制，不包含你的本机控制权限');}catch{text('请使用 Windows 客户端的“邀请朋友”按钮复制');}});
@@ -172,7 +177,9 @@ try{navigator.mediaDevices?.setCaptureHandleConfig?.({handle:'voicebridge-room',
 window.addEventListener('pagehide',()=>{saveResume();audio?.keyUp();screenView.leave();socket?.close(1001,'Page hidden');void audio?.stop();channel?.close();});window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();});el('nickname').value=preferences.nickname;enabled(false);refreshControls();if(paired){el('nickname').value='本机客户端';el('join').textContent='连接本机房间控制';}
 el('invite').disabled=!room||!publicEntry&&(!cipher||!/^[a-f0-9]{64}$/.test(token||''));
 if(paired)void join();
-else void currentUser().then(user=>{el('nickname').value=user.nickname;savePreferences({nickname:user.nickname});}).catch(error=>{if(error.status===401)loginRedirect();else text(error.message);});
+else void currentUser().then(user=>{accountId=user.id;el('nickname').value=user.nickname;savePreferences({nickname:user.nickname});try{if(readRecovery(sessionStorage,resumeStorage,accountId))void join();}catch{}}).catch(error=>{if(error.status===401)loginRedirect();else text(error.message);});
+
+el('resumeAudio').onclick=async()=>{try{await audio?.resumePlayback();if(audio?.context?.state==='running')text('浏览器音频已恢复，原有关麦和音量选择保持。');}catch{text('浏览器暂未恢复音频，请检查当前设备后重试。');}};
 
 el('desktopJoin').href=publicEntry?'voicebridge://join/'+room:'voicebridge://invite/'+encodeURIComponent(simpleInvite());
 el('audioSettings').onclick=()=>el('settingsDialog').showModal();el('closeSettings').onclick=()=>el('settingsDialog').close();

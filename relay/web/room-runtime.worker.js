@@ -1,4 +1,5 @@
 import {RoomCrypto} from './crypto.js';
+import {roomRequest} from './lobby.js';
 // The UI never owns PCM delivery, codecs, encryption, or heartbeat timers.
 let socket=null,generation=0,closed=false,joinRequest=null,resume=null,cipher=null,selfId='',roster=new Set(),publicRoom=false,attempt=0,retryTimer,heartbeat,lastPong=0,mixer=null;
 let attachment=null,pendingReconnect=false;
@@ -33,13 +34,13 @@ function lost(ws,code=1006){
  if(ws!==socket||closed)return;clearNetwork();socket=null;generation++;try{ws.close(4008,'Recovering');}catch{}
  if(terminal(code)){closed=true;emit({type:'close',code});return;}
  if(code===4010){resume=null;selfId='';lastSequence.clear();}
- emit({type:'reconnecting',code});const delay=Math.min(5000,500*2**Math.min(attempt++,4))*(.8+Math.random()*.4);clearTimeout(retryTimer);retryTimer=setTimeout(()=>void connect(true),delay);
+ emit({type:'reconnecting',code});const delay=Math.min(5000,500*2**Math.min(attempt++,4)*(.8+Math.random()*.4));clearTimeout(retryTimer);retryTimer=setTimeout(()=>void connect(true),delay);
 }
 async function connect(reconnecting=false){
  if(closed)return;try{
-  if(reconnecting&&!joinRequest.requireAttachment){const status=await fetch('/api/rooms/'+joinRequest.roomId+'/status',{cache:'no-store'});if(status.status===401||status.status===404){closed=true;emit({type:'close',code:status.status===401?4003:4004});return;}if(!status.ok)throw Error('Room status unavailable');}
+  if(reconnecting&&!joinRequest.requireAttachment){const status=await roomRequest('/api/rooms/'+joinRequest.roomId+'/status',{cache:'no-store'});if(status.status===401||status.status===404){closed=true;emit({type:'close',code:status.status===401?4003:4004});return;}if(!status.ok)throw Error('Room status unavailable');}
   if(joinRequest.requireAttachment&&!attachment){pendingReconnect=reconnecting;emit({type:'needAttachment'});return;}
-  if(reconnecting&&!resume&&publicRoom&&joinRequest?.role!=='controller'){const response=await fetch('/api/lobby/rooms/'+joinRequest.roomId+'/join',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});if(!response.ok){if(response.status===401||response.status===404){closed=true;emit({type:'close',code:response.status===401?4003:4004});return;}throw Error('Admission unavailable');}const entry=await response.json();joinRequest.token=entry.token;cipher=new RoomCrypto(joinRequest.roomId,entry.key);}
+  if(reconnecting&&!resume&&publicRoom&&joinRequest?.role!=='controller'){const response=await roomRequest('/api/lobby/rooms/'+joinRequest.roomId+'/join',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});if(!response.ok){if(response.status===401||response.status===404){closed=true;emit({type:'close',code:response.status===401?4003:4004});return;}throw Error('Admission unavailable');}const entry=response.data;joinRequest.token=entry.token;cipher=new RoomCrypto(joinRequest.roomId,entry.key);}
   const protocols=attachment?['voicebridge','vb-ticket.'+attachment]:undefined;attachment=null;const wire=++generation,ws=protocols?new WebSocket(joinRequest.url,protocols):new WebSocket(joinRequest.url);socket=ws;ws.binaryType='arraybuffer';lastPong=Date.now();
   ws.onopen=()=>{if(wire!==generation||closed){ws.close();return;}if(reconnecting||joinRequest.type==='join'){const request={...joinRequest};delete request.url;delete request.roomId;delete request.requireAttachment;delete request.resume;if(resume)request.resume=resume;ws.send(JSON.stringify(request));}if(!reconnecting)emit({type:'open'});heartbeat=setInterval(()=>{if(ws!==socket)return;if(Date.now()-lastPong>20000){lost(ws);return;}if(ws.readyState===1)ws.send(JSON.stringify({type:'ping',at:Date.now()}));},5000);};
   ws.onmessage=event=>{if(wire!==generation||closed)return;if(event.data instanceof ArrayBuffer){receiveAudio(event.data,wire);return;}let message;try{message=JSON.parse(event.data);}catch{return;}
@@ -54,7 +55,7 @@ async function connect(reconnecting=false){
  }catch{if(!closed){emit({type:'reconnecting',code:1006});clearTimeout(retryTimer);retryTimer=setTimeout(()=>void connect(true),5000);}}
 }
 self.onmessage=({data:m})=>{
- if(m.type==='connect'){closed=false;joinRequest={url:m.url,roomId:m.roomId,role:m.role,requireAttachment:m.requireAttachment,...(m.join||{})};resume=m.join?.resume||null;delete joinRequest.resume;cipher=new RoomCrypto(m.roomId,m.key);void connect();}
+ if(m.type==='connect'){closed=false;publicRoom=m.join?.knownPublicRoom===true;joinRequest={url:m.url,roomId:m.roomId,role:m.role,requireAttachment:m.requireAttachment,...(m.join||{})};resume=m.join?.resume||null;delete joinRequest.resume;delete joinRequest.knownPublicRoom;cipher=new RoomCrypto(m.roomId,m.key);void connect();}
  if(m.type==='attachment'){attachment=m.ticket;if(joinRequest&&!socket)void connect(pendingReconnect);}
  if(m.type==='send'){let value;try{value=JSON.parse(m.data);}catch{return;}if(value.type==='join'){joinRequest={...joinRequest,...value};if(value.resume)resume=value.resume;delete joinRequest.resume;}if(value.type==='flags'){desired.microphone=value.microphone;desired.sharing=value.music;joinRequest.source=value.source;}if(value.type==='leave'){closed=true;clearTimeout(retryTimer);clearNetwork();}if(socket?.readyState===1)socket.send(m.data);}
  if(m.type==='desired'){desired={...desired,...m.value};if(!gate(0))queues[0]=[];if(!gate(1))queues[1]=[];}
