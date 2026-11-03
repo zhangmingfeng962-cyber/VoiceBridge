@@ -1,6 +1,10 @@
 export async function accountApi(route,body,method='POST'){
- const response=await fetch(route,{method,credentials:'same-origin',headers:{'Content-Type':'application/json'},...(method==='GET'?{}:{body:JSON.stringify(body||{})})});
- const data=await response.json().catch(()=>({error:'服务暂时不可用'}));if(!response.ok)throw Object.assign(Error(data.error||'请求未完成'),{status:response.status});return data;
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
+ try{
+  const response=await fetch(route,{method,signal:controller.signal,credentials:'same-origin',headers:{'Content-Type':'application/json'},...(method==='GET'?{}:{body:JSON.stringify(body||{})})});
+  const data=await response.json().catch(()=>{throw Error('服务返回异常，请稍后重试');});if(!response.ok)throw Object.assign(Error(data.error||'请求未完成'),{status:response.status});return data;
+ }catch(error){if(controller.signal.aborted)throw Error('网络响应超时，请检查网络后重试；已创建的账号可以直接密码登录。');throw error;}
+ finally{clearTimeout(timer);}
 }
 export async function currentUser(){const identity=await accountApi('/api/me',null,'GET');if(identity.expires&&identity.expires-Date.now()<7*86400000)await accountApi('/api/auth/refresh');return identity.user;}
 export function rememberReturn(){try{sessionStorage.setItem('voicebridge.return',location.pathname+location.hash);}catch{}}

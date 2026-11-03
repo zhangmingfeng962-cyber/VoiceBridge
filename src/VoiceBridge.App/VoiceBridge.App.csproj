@@ -3,4 +3,5 @@
  <ItemGroup><PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" /><PackageReference Include="Velopack" Version="1.2.161" /><ProjectReference Include="../VoiceBridge.Core/VoiceBridge.Core.csproj" /><PackageReference Include="NAudio.Wasapi" Version="2.2.1" /></ItemGroup>
  <ItemGroup><Resource Include="Assets/voicebridge.ico" /><Resource Include="Assets/voicebridge.png" /><EmbeddedResource Include="Assets/update-public.pem" LogicalName="VoiceBridge.UpdatePublicKey" /></ItemGroup>
  <ItemGroup><Content Include="Native/voicebridge-rnnoise.dll" Link="voicebridge-rnnoise.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" /></ItemGroup>
+ <ItemGroup><Content Include="../../third-party/*" Link="licenses/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" /></ItemGroup>
 </Project>

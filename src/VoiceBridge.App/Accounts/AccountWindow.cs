@@ -14,12 +14,12 @@ public sealed class AccountWindow:Window
  private readonly AccountClient account;private readonly StackPanel fields=new(){Margin=new Thickness(32,20,32,28)};
  private readonly TextBlock heading=new(){FontSize=24,FontWeight=FontWeights.SemiBold},notice=new(){Foreground=new SolidColorBrush(Color.FromRgb(221,185,117)),Margin=new Thickness(0,16,0,12)};
  private readonly TextBox email=new(){MaxLength=254},code=new(){MaxLength=6},nickname=new(){MaxLength=20};
- private readonly PasswordField password=new(),again=new(),oldPassword=new();
+ private readonly PasswordField password=new("密码"),again=new("确认密码"),oldPassword=new("当前密码");
  private Image? preview;
  private string mode="login",step="email",ticket="";private byte[]? avatar;private bool busy;private DateTime sendAfter;
  public AccountWindow(bool profile=false,AccountClient? accountClient=null)
  {
-  account=accountClient??AccountClient.Current;Title=profile?"个人资料 · VoiceBridge":"登录 · VoiceBridge";Width=470;Height=740;MinWidth=400;MinHeight=540;WindowStartupLocation=WindowStartupLocation.CenterOwner;ResizeMode=ResizeMode.CanResize;Content=new ScrollViewer{Content=fields,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};WindowAppearance.Apply(this);
+  account=accountClient??AccountClient.Current;System.Windows.Automation.AutomationProperties.SetName(email,"邮箱");System.Windows.Automation.AutomationProperties.SetName(code,"邮箱验证码");System.Windows.Automation.AutomationProperties.SetName(nickname,"昵称");Title=profile?"个人资料 · VoiceBridge":"登录 · VoiceBridge";Width=470;Height=740;MinWidth=400;MinHeight=540;WindowStartupLocation=WindowStartupLocation.CenterOwner;ResizeMode=ResizeMode.CanResize;Content=new ScrollViewer{Content=fields,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};WindowAppearance.Apply(this);
   if(profile&&account.User is not null)mode="profile";nickname.Text=account.User?.Nickname??new ProfileStore().Read().Nickname;Build();
  }
  private void Label(string text)=>fields.Children.Add(new TextBlock{Text=text,Margin=new Thickness(0,16,0,6),FontSize=14});
@@ -51,5 +51,5 @@ public sealed class PasswordField:Grid
 {
  private readonly PasswordBox hidden=new(){MaxLength=128,Padding=new Thickness(10,8,10,8),MinHeight=38,Background=new SolidColorBrush(Color.FromRgb(32,32,32)),Foreground=Brushes.White};private readonly TextBox shown=new(){MaxLength=128,Visibility=Visibility.Collapsed,Margin=new Thickness(0)};private bool visible;
  public string Value{get=>visible?shown.Text:hidden.Password;set{shown.Text=value;hidden.Password=value;}}
- public PasswordField(){ColumnDefinitions.Add(new());ColumnDefinitions.Add(new(){Width=GridLength.Auto});Children.Add(hidden);Children.Add(shown);var toggle=new Button{Content="显示",MinWidth=52,Margin=new Thickness(8,0,0,0),Padding=new Thickness(8,4,8,4)};SetColumn(toggle,1);toggle.Click+=(_,_)=>{var current=Value;visible=!visible;Value=current;hidden.Visibility=visible?Visibility.Collapsed:Visibility.Visible;shown.Visibility=visible?Visibility.Visible:Visibility.Collapsed;toggle.Content=visible?"隐藏":"显示";};Children.Add(toggle);}
+ public PasswordField(string name="密码"){System.Windows.Automation.AutomationProperties.SetName(hidden,name);System.Windows.Automation.AutomationProperties.SetName(shown,name);ColumnDefinitions.Add(new());ColumnDefinitions.Add(new(){Width=GridLength.Auto});Children.Add(hidden);Children.Add(shown);var toggle=new Button{Content="显示",MinWidth=52,Margin=new Thickness(8,0,0,0),Padding=new Thickness(8,4,8,4)};System.Windows.Automation.AutomationProperties.SetName(toggle,"显示"+name);SetColumn(toggle,1);toggle.Click+=(_,_)=>{var current=Value;visible=!visible;Value=current;hidden.Visibility=visible?Visibility.Collapsed:Visibility.Visible;shown.Visibility=visible?Visibility.Visible:Visibility.Collapsed;toggle.Content=visible?"隐藏":"显示";System.Windows.Automation.AutomationProperties.SetName(toggle,(visible?"隐藏":"显示")+name);};Children.Add(toggle);}
 }
