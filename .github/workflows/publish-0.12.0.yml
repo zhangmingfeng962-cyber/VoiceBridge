@@ -1,8 +1,5 @@
 name: Publish verified VoiceBridge 0.12.0
 on:
-  push:
-    branches: [main]
-    paths: ['.github/workflows/publish-0.12.0.yml']
   workflow_dispatch:
 permissions:
   contents: read
