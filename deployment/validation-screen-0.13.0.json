@@ -1,0 +1,24 @@
+{
+  "udp": {
+    "passed": true,
+    "checks": 10
+  },
+  "tcp": {
+    "passed": true,
+    "checks": 10
+  },
+  "tls": {
+    "passed": true,
+    "checks": 10
+  },
+  "soak": {
+    "passed": true,
+    "seconds": 1205,
+    "renewals": [
+      5,
+      5,
+      5
+    ],
+    "syntheticOnly": true
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "installed": {
+    "passed": true,
+    "version": "0.13.0.0",
+    "preferencesPreserved": true,
+    "selfContained": true,
+    "runtime": "10.0.14",
+    "microphoneOpened": false,
+    "licenseIncluded": true
+  },
+  "delta": [
+    {
+      "passed": true,
+      "failDelta": false,
+      "deltaCount": 1,
+      "Types": [
+        "Delta"
+      ],
+      "Bytes": 820089,
+      "Size": 73710818
+    },
+    {
+      "passed": true,
+      "failDelta": true,
+      "deltaCount": 1,
+      "Types": [
+        "Delta",
+        "Full"
+      ],
+      "Bytes": 73710818,
+      "Size": 73710818
+    }
+  ],
+  "download": {
+    "oldBytes": 85974445,
+    "newBytes": 81242850,
+    "deltaBytes": 820089,
+    "fullUpdateBytes": 73710818,
+    "oldRangeSeconds": 3.961148,
+    "newRangeSeconds": 3.969658,
+    "oldBytesPerSecond": 1058861,
+    "newBytesPerSecond": 1056592,
+    "rangeVerified": true
+  }
+}

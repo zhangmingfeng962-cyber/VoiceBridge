@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "seconds": 7202,
+  "cycles": 707,
+  "error": null,
+  "syntheticOnly": true,
+  "realMicrophone": false,
+  "realScreen": false,
+  "frames": [
+    714954,
+    718266
+  ],
+  "decodedEnergy": [
+    163018.37144123914,
+    162167.89450401987
+  ]
+}

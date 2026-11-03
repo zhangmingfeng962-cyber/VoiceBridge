@@ -1,0 +1,21 @@
+{
+  "version": "0.13.0",
+  "sourceCommit": "03b14b147df1abe782a5aeb7334e8eecb42d80f0",
+  "transferCommit": "938bef2b49ba27d917fed0c054ceedc64e744405",
+  "manifestSha256": "b1ad48dad09f1d96cc757a6d6c569bc4b413b60c4713cc770e9868b3b824c6f6",
+  "feedSha256": "e387d4aa118385543269e435d53ccb9767ff7c452b768ac2e75d5005c7e6de5c",
+  "installer": {
+    "bytes": 81242850,
+    "sha256": "c998fc779d614cf132b52e19a847c00c4655c4b007a96179e2588aca1ebc6340"
+  },
+  "delta": {
+    "bytes": 820089,
+    "sha256": "5d713c9d521718189b8ddbde6412810622ea585135fa2a897509de48730530ef"
+  },
+  "tests": {
+    "web": 58,
+    "native": 27,
+    "nativeEndurancePassed": true
+  },
+  "freshInstallGate": "publish-workflow"
+}

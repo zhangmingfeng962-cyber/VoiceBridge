@@ -1,0 +1,95 @@
+name: Publish verified VoiceBridge 0.13.0
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/publish-0.13.0.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Retrieve the exact validated build
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/Fetch-StagedRelease013.py 938bef2b49ba27d917fed0c054ceedc64e744405 b1ad48dad09f1d96cc757a6d6c569bc4b413b60c4713cc770e9868b3b824c6f6 artifacts/release
+      - name: Verify a fresh per-user installation before deployment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $setup=Join-Path $PWD 'artifacts/release/VoiceBridgeSetup.exe'
+          if((Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'c998fc779d614cf132b52e19a847c00c4655c4b007a96179e2588aca1ebc6340'){throw 'Installer differs from validated artifact'}
+          $root=Join-Path $env:LOCALAPPDATA 'VoiceBridge.Desktop'
+          if(Test-Path -LiteralPath $root){throw 'Fresh installation requires an empty application directory'}
+          $log=Join-Path $PWD 'artifacts/release/install-smoke.log'
+          $child=Start-Process -FilePath $setup -ArgumentList @('--silent','--log',$log) -PassThru -WindowStyle Hidden
+          if(!$child.WaitForExit(120000) -or $child.ExitCode -ne 0){throw 'Fresh installer failed'}
+          $app=Join-Path $root 'current'
+          $version=[Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $app 'VoiceBridge.dll')).FileVersion
+          if($version -ne '0.13.0.0'){throw 'Installed version differs'}
+          $runtime=Get-Content (Join-Path $app 'VoiceBridge.runtimeconfig.json') -Raw|ConvertFrom-Json
+          if(!$runtime.runtimeOptions.includedFrameworks -or @($runtime.runtimeOptions.includedFrameworks|Where-Object {$_.version -ne '10.0.14'}).Count){throw 'Runtime is not the pinned self-contained version'}
+          if(!(Test-Path (Join-Path $app 'licenses/WebView2-LICENSE.txt'))){throw 'Bundled license missing'}
+          $report=Join-Path $PWD 'artifacts/release/installed-self-test.json'
+          $test=Start-Process -FilePath (Join-Path $app 'VoiceBridge.exe') -ArgumentList @('--self-test',$report) -PassThru -WindowStyle Hidden
+          if(!$test.WaitForExit(25000) -or $test.ExitCode -ne 0){throw 'Installed executable diagnostic failed'}
+          $result=Get-Content $report -Raw|ConvertFrom-Json
+          if(!$result.NoiseOutputFinite){throw 'Installed RNNoise diagnostic failed'}
+          [ordered]@{passed=$true;freshInstall=$true;version=$version;runtime='10.0.14';selfContained=$true;syntheticOnly=$true;microphoneOpened=$false;sourceCommit='03b14b147df1abe782a5aeb7334e8eecb42d80f0'}|ConvertTo-Json|Set-Content artifacts/release/install-smoke.json
+      - name: Wait for the domestic relay and verify the signed update feed
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $ready=$false
+          $http=[Net.Http.HttpClient]::new()
+          $http.Timeout=[TimeSpan]::FromSeconds(10)
+          $key=[Security.Cryptography.ECDsa]::Create()
+          $key.ImportFromPem([IO.File]::ReadAllText((Join-Path $PWD 'src/VoiceBridge.App/Assets/update-public.pem')))
+          try {
+            for($attempt=0;$attempt -lt 120;$attempt++){
+              try {
+                $health=Invoke-RestMethod 'https://voicebridge-room.cn/health' -TimeoutSec 5
+                if($health.release -eq '0.13.0' -and $health.authRequired -and $health.nativeControls -and $health.lobby){
+                  [byte[]]$feed=$http.GetByteArrayAsync('https://voicebridge-room.cn/updates/releases.win-x64.json').GetAwaiter().GetResult()
+                  $sig=$http.GetStringAsync('https://voicebridge-room.cn/updates/releases.win-x64.json.sig').GetAwaiter().GetResult().Trim()
+                  $valid=$key.VerifyData($feed,[Convert]::FromBase64String($sig),[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.DSASignatureFormat]::Rfc3279DerSequence)
+                  $hash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($feed)).ToLowerInvariant()
+                  if($valid -and $hash -eq 'e387d4aa118385543269e435d53ccb9767ff7c452b768ac2e75d5005c7e6de5c'){$ready=$true;break}
+                }
+              }catch{}
+              Start-Sleep -Seconds 5
+            }
+          }finally{$key.Dispose();$http.Dispose()}
+          if(!$ready){throw 'Domestic 0.13 relay and verified feed are not ready; publication stopped'}
+          Write-Output 'DOMESTIC_013_READY_AND_SIGNED'
+      - name: Publish the installer, delta, source and verification report
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $PSNativeCommandUseErrorActionPreference=$true
+          Copy-Item deployment/releases.win-x64.json.sig artifacts/release/releases.win-x64.json.sig
+          Copy-Item docs/VERIFICATION-0.13.0.md artifacts/release/VERIFICATION-0.13.0.md
+          Copy-Item deployment/validation-native-2h-0.13.0.json artifacts/release/validation-native-2h-0.13.0.json
+          $lines=Get-ChildItem artifacts/release -File|Where-Object {$_.Name -ne 'SHA256SUMS.txt'}|ForEach-Object {(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()+'  '+$_.Name}
+          [IO.File]::WriteAllLines((Join-Path $PWD 'artifacts/release/SHA256SUMS.txt'),$lines,[Text.Encoding]::ASCII)
+          gh release create v0.13.0 --repo "$env:GITHUB_REPOSITORY" --target 03b14b147df1abe782a5aeb7334e8eecb42d80f0 --title 'VoiceBridge 0.13.0 · 账号与体验升级' --notes-file docs/RELEASE-NOTES-0.13.0.md --latest artifacts/release/VoiceBridgeSetup.exe artifacts/release/VoiceBridge-v0.13.0-source.zip artifacts/release/VoiceBridge.Desktop-0.13.0-win-x64-full.nupkg artifacts/release/VoiceBridge.Desktop-0.13.0-win-x64-delta.nupkg artifacts/release/releases.win-x64.json artifacts/release/releases.win-x64.json.sig artifacts/release/SHA256SUMS.txt artifacts/release/install-smoke.json artifacts/release/VERIFICATION-0.13.0.md artifacts/release/validation-native-2h-0.13.0.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: VoiceBridge-0.13.0-install-verification
+          retention-days: 3
+          path: |
+            artifacts/release/install-smoke.json
+            artifacts/release/installed-self-test.json
+            artifacts/release/install-smoke.log
