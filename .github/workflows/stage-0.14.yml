@@ -1,0 +1,43 @@
+name: Stage verified VoiceBridge 0.14.0
+on:
+  push:
+    branches: [voicebridge-0.14.0-stage]
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: write
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CANDIDATE_RUN: '44985642934'
+      CANDIDATE_SHA: 'b2dd6cafd439239174d06455a0f77f4e46f55f50'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.3'
+      - name: Wait for the pinned candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN" > candidate.json
+            jq -e --arg sha "$CANDIDATE_SHA" '.head_sha == $sha' candidate.json >/dev/null
+            if jq -e '.status == "completed"' candidate.json >/dev/null; then break; fi
+            sleep 5
+          done
+          jq -e '.status == "completed" and .conclusion == "success"' candidate.json >/dev/null
+      - uses: actions/download-artifact@v4
+        with:
+          name: VoiceBridge-0.14.0-windows-candidate
+          path: artifacts
+          run-id: 44985642934
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Stage installer, source and relay
+        run: |
+          (cd relay && npm ci --ignore-scripts)
+          node scripts/Build-OfflineRelay.mjs artifacts/offline-relay
+          python scripts/Upload-ReleaseBundle014.py
