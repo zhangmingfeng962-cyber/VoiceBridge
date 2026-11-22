@@ -64,3 +64,56 @@ test('embedded screen ticket is one-use and bound to the signed-in native member
   assert.equal(status,401);assert.equal(f.service.peers.size,1);
  }finally{controller?.terminate();await f.close();}
 });
+
+test('one account occupies one seat across browser, native and concurrent joins',async()=>{
+ const f=await fixture();
+ try{
+  const user=await f.register(),entry=await f.call('/api/rooms',{name:'去重测试'},user.token),room=entry.data;
+  const original=await f.join(room,user);
+  const attempts=await Promise.all(['desktop','browser'].map(async role=>{
+    const socket=new WebSocket(f.service.url.replace('http:','ws:')+'/api/rooms/'+room.id+'/voice',{origin:f.service.url,headers:{Authorization:'Bearer '+user.token}});
+    const closed=once(socket,'close');
+    await once(socket,'open');
+    socket.send(JSON.stringify({type:'join',version:4,role,token:room.listenToken,canResume:true}));
+    return (await closed)[0];
+  }));
+  assert.deepEqual(attempts,[4012,4012]);
+  assert.equal(original.socket.readyState,WebSocket.OPEN);
+  assert.equal(f.service.peers.size,1);
+  const close=once(original.socket,'close');original.socket.terminate();await close;
+  const resumed=await f.join(room,user,{resume:{memberId:original.id,token:original.resumeToken}});
+  assert.equal(resumed.id,original.id);
+  assert.equal(f.service.peers.size,1);
+ }finally{await f.close();}
+});
+
+test('six-character password policy applies only when creating or setting credentials',async()=>{
+ const f=await fixture();
+ try{
+  const {ticket}=await f.verified('six@example.com');
+  for(const value of ['abcd1','abcdef','一二三四五六','12    ']){
+   const rejected=await f.call('/api/auth/register',{verificationToken:ticket,password:value,nickname:'短密码'});
+   assert.equal(rejected.status,400);
+  }
+  const created=await f.call('/api/auth/register',{verificationToken:ticket,password:'开黑守望12',nickname:'短密码'});
+  assert.equal(created.status,200);
+  assert.equal((await f.call('/api/auth/login',{address:'six@example.com',password:'开黑守望12'})).status,200);
+  assert.equal((await f.call('/api/auth/password',{currentPassword:'开黑守望12',newPassword:'ab cd!'},created.data.token)).status,200);
+ }finally{await f.close();}
+});
+
+test('a burst of unchanged legacy flags keeps connection available and muting immediate',async()=>{
+ const f=await fixture();
+ try{
+  const user=await f.register();
+  const room=(await f.call('/api/rooms',{name:'音量测试'},user.token)).data;
+  const peer=await f.join(room,user);
+  const send=(message)=>peer.socket.send(JSON.stringify(message));
+  for(let i=0;i<260;i++)send({type:'flags',microphone:true,music:false});
+  send({type:'flags',microphone:false,music:false});
+  send({type:'ping',at:234});
+  await peer.next(message=>message.type==='pong'&&message.at===234);
+  assert.equal(f.service.peers.get(peer.id).microphone,false);
+  assert.equal(peer.socket.readyState,WebSocket.OPEN);
+ }finally{await f.close();}
+});

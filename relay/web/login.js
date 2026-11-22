@@ -1,3 +1,4 @@
+import {validateNewPassword} from './password-policy.js';
 import {accountApi,returnTarget,avatarPng,currentUser,announceAccount} from './auth-client.js';
 import {readPreferences,savePreferences} from './preferences.js';
 const el=id=>document.getElementById(id);let mode='login',stage='email',ticket=null,busy=false,avatar=null,cooldownUntil=0;
@@ -11,7 +12,7 @@ el('sendCode').onclick=async()=>{if(busy||Date.now()<cooldownUntil)return;if(!el
 setInterval(()=>{const seconds=Math.ceil((cooldownUntil-Date.now())/1000);el('sendCode').disabled=seconds>0||busy;el('sendCode').textContent=seconds>0?seconds+' 秒后重发':'获取验证码';},500);
 el('authForm').onsubmit=async event=>{event.preventDefault();if(busy)return;busy=true;render();el('authError').textContent='';try{
  if(mode!=='login'&&stage==='email'){const verified=await accountApi('/api/auth/verify',{address:el('email').value,code:el('code').value,purpose:mode});ticket=verified.verificationToken;stage='password';el('password').focus();return;}
- if(mode!=='login'){if([...el('password').value.normalize('NFC')].length<15)throw Error('密码至少需要 15 个字符，可以使用一段短语');if(el('password').value!==el('confirmPassword').value)throw Error('两次输入的密码不一致');}
+ if(mode!=='login'){const policy=validateNewPassword(el('password').value);if(policy.error)throw Error(policy.error);if(el('password').value!==el('confirmPassword').value)throw Error('两次输入的密码不一致');}
  const result=mode==='login'?await accountApi('/api/auth/login',{address:el('email').value,password:el('password').value}):mode==='register'?await accountApi('/api/auth/register',{verificationToken:ticket,password:el('password').value,nickname:el('nickname').value}):await accountApi('/api/auth/reset',{verificationToken:ticket,password:el('password').value});
  if(mode==='reset'){change('login');el('authError').textContent='密码已更新，请使用新密码登录。';return;}
  if(result.user)savePreferences({nickname:result.user.nickname});if(avatar&&mode==='register'){try{await accountApi('/api/me/avatar',{png:avatar});}catch{sessionStorage.setItem('voicebridge.profileNotice','头像未能上传，可在个人资料里重试。');}}

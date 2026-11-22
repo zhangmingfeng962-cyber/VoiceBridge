@@ -29,7 +29,7 @@ function receiveAudio(data,wire){if(!mixer||!cipher||pendingDecode>=24)return;pe
  }).catch(()=>emit({type:'notice',message:'收到无法解密的音频，请核对房间邀请'})).finally(()=>pendingDecode--);}
 function flags(){if(socket?.readyState===1&&networkReady&&joinRequest?.role!=='controller')socket.send(JSON.stringify({type:'flags',microphone:desired.microphone,music:desired.sharing,source:joinRequest?.source||'浏览器标签页'}));}
 function clearNetwork(){networkReady=false;desired.pressed=false;queues[0]=[];queues[1]=[];clearInterval(heartbeat);}
-function terminal(code){return [4001,4003,4004,4009,4011].includes(code);}
+function terminal(code){return [4001,4003,4004,4009,4011,4012].includes(code);}
 function lost(ws,code=1006){
  if(ws!==socket||closed)return;clearNetwork();socket=null;generation++;try{ws.close(4008,'Recovering');}catch{}
  if(terminal(code)){closed=true;emit({type:'close',code});return;}

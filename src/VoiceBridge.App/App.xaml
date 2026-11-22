@@ -28,4 +28,45 @@
  <Style TargetType="ListBox"><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="#F5F5F2"/><Setter Property="BorderThickness" Value="0"/></Style>
  <Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,0,8"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem"><ContentPresenter/></ControlTemplate></Setter.Value></Setter></Style>
  <Style TargetType="Slider"><Setter Property="Minimum" Value="0"/><Setter Property="MinHeight" Value="30"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Slider"><Grid Margin="6,0"><Track x:Name="PART_Track" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}" IsDirectionReversed="False"><Track.DecreaseRepeatButton><RepeatButton Command="{x:Static Slider.DecreaseLarge}" Focusable="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Height="4" CornerRadius="2" Background="#80C9D5"/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.DecreaseRepeatButton><Track.IncreaseRepeatButton><RepeatButton Command="{x:Static Slider.IncreaseLarge}" Focusable="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Height="4" CornerRadius="2" Background="#444444"/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.IncreaseRepeatButton><Track.Thumb><Thumb Width="13" Height="13"><Thumb.Template><ControlTemplate TargetType="Thumb"><Ellipse Fill="#F5F5F2"/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb></Track></Grid></ControlTemplate></Setter.Value></Setter></Style>
+<Style TargetType="ScrollBar">
+  <Setter Property="Width" Value="11"/>
+  <Setter Property="MinWidth" Value="11"/>
+  <Setter Property="Template">
+    <Setter.Value>
+      <ControlTemplate TargetType="ScrollBar">
+        <Grid Background="#181818">
+          <Track x:Name="PART_Track" Margin="2" Orientation="{TemplateBinding Orientation}"
+            Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}"
+            ViewportSize="{TemplateBinding ViewportSize}" IsDirectionReversed="True">
+            <Track.DecreaseRepeatButton>
+              <RepeatButton x:Name="PageBack" Command="{x:Static ScrollBar.PageUpCommand}" Focusable="False">
+                <RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></RepeatButton.Template>
+              </RepeatButton>
+            </Track.DecreaseRepeatButton>
+            <Track.IncreaseRepeatButton>
+              <RepeatButton x:Name="PageForward" Command="{x:Static ScrollBar.PageDownCommand}" Focusable="False">
+                <RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></RepeatButton.Template>
+              </RepeatButton>
+            </Track.IncreaseRepeatButton>
+            <Track.Thumb><Thumb>
+              <Thumb.Template>
+                <ControlTemplate TargetType="Thumb"><Border Background="#747d7e" CornerRadius="4"/></ControlTemplate>
+              </Thumb.Template>
+            </Thumb></Track.Thumb>
+          </Track>
+        </Grid>
+        <ControlTemplate.Triggers>
+          <Trigger Property="Orientation" Value="Horizontal">
+            <Setter TargetName="PART_Track" Property="IsDirectionReversed" Value="False"/>
+            <Setter TargetName="PageBack" Property="Command" Value="{x:Static ScrollBar.PageLeftCommand}"/>
+            <Setter TargetName="PageForward" Property="Command" Value="{x:Static ScrollBar.PageRightCommand}"/>
+          </Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate>
+    </Setter.Value>
+  </Setter>
+  <Style.Triggers>
+    <Trigger Property="Orientation" Value="Horizontal"><Setter Property="Width" Value="Auto"/><Setter Property="Height" Value="11"/></Trigger>
+  </Style.Triggers>
+</Style>
 <Style TargetType="ContextMenu"><Setter Property="Background" Value="#202020"/><Setter Property="Foreground" Value="#F5F5F2"/></Style><Style TargetType="MenuItem"><Setter Property="Foreground" Value="#F5F5F2"/><Setter Property="Padding" Value="14,8"/></Style></Application.Resources></Application>

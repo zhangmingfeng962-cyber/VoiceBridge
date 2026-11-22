@@ -1,3 +1,4 @@
+import {CameraView} from './camera-view.js';
 import {ScreenShare} from './screen.js';
 const byId=id=>document.getElementById(id);
 const names={window:'软件窗口',monitor:'桌面／显示器',browser:'浏览器标签页'};
@@ -5,8 +6,9 @@ const names={window:'软件窗口',monitor:'桌面／显示器',browser:'浏览�
 export class ScreenView{
   constructor({send,sound,setSound,setVolume,setSource,setListening,audioPressure}){
     Object.assign(this,{send,sound,setSound,setVolume,setSource,setListening,audioPressure});this.engine=null;this.joined=false;this.state={owner:null};
-    byId('screenStart').onclick=()=>void this.engine?.select();
-    byId('screenChange').onclick=()=>void this.engine?.select(true);
+    this.cameras=new CameraView({send,displaySession:()=>this.engine?.session,displaySelecting:()=>!!this.engine?.selecting,audioPressure});
+    byId('screenStart').onclick=()=>{if(!this.cameras.selecting)void this.engine?.select();};
+    byId('screenChange').onclick=()=>{if(!this.cameras.selecting)void this.engine?.select(true);};
     byId('screenPause').onclick=()=>void this.engine?.pause();
     byId('screenStop').onclick=()=>this.engine?.stop();
     byId('screenWatch').onclick=()=>this.engine?.setWatching(!this.engine.watching);
@@ -29,15 +31,19 @@ export class ScreenView{
     this.render();
   }
   join(selfId){
-    this.leave();this.joined=true;
-    this.engine=new ScreenShare({selfId,send:this.send,onState:state=>{this.state=state;this.render();},onVideo:(stream,local)=>{
+    this.leave();this.joined=true;this.cameras.join(selfId);
+    this.engine=new ScreenShare({selfId,send:this.send,otherSession:()=>this.cameras.session,onState:state=>{this.state=state;this.render();},onVideo:(stream,local)=>{
       const video=byId('screenVideo');video.srcObject=stream;video.muted=true;this.hasVideo=!!stream;this.localPreview=local;
       if(stream)void video.play().catch(()=>this.status('画面已收到，可点击“重连画面”重新播放'));this.render();
     },onStatus:message=>this.status(message),onMetrics:metric=>this.metrics(metric)});
     this.engine.audioPressure=this.audioPressure;this.render();
   }
-  receive(message){return this.engine?.receive(message);}
-  resume(){this.engine?.resume();}
+  receive(message){
+    if(message.type==='screen:hello'||message.type==='screen:cameras'||message.cameraOwner)
+      this.cameras.receive(message);
+    if(message.type!=='screen:cameras'&&!message.cameraOwner)return this.engine?.receive(message);
+  }
+  resume(){this.engine?.resume();this.cameras.resume();}
   status(message){this.message=message;byId('screenStatus').textContent=message;}
   metrics(metric){
     if(!this.state.owner)return;
@@ -63,7 +69,7 @@ export class ScreenView{
   }
   render(){
     const s=this.state,own=!!s.owner&&s.self,other=!!s.owner&&!own,ready=this.joined&&s.supported;
-    byId('screenPanel').classList.toggle('hasShare',!!s.owner);
+    byId('screenPanel').classList.toggle('hasShare',!!s.owner);this.cameras.setDisplayVisible(!!s.owner&&(s.self||s.watching!==false));
     byId('screenStage').hidden=!s.owner||!!this.collapsed;byId('screenCollapse').hidden=!s.owner;byId('screenCollapse').textContent=this.collapsed?'展开预览':'收起预览';
     if(!s.owner){this.collapsed=false;byId('screenPanel').classList.remove('screenExpanded');}
     const statusKey=!this.joined?'offline':!s.supported?'unsupported':s.session||'idle';if(this.statusKey!==statusKey){this.statusKey=statusKey;this.message='';}
@@ -90,5 +96,5 @@ export class ScreenView{
     if(!s.owner)byId('screenNetwork').textContent='自动画质优先保障人声与音乐；网络往返时间不等于画面总延迟。';
     this.syncSound();
   }
-  leave(){this.engine?.close();this.engine=null;this.joined=false;this.state={owner:null};this.hasVideo=false;byId('screenVideo').srcObject=null;this.render();}
+  leave(){this.engine?.close();this.engine=null;this.cameras.leave();this.joined=false;this.state={owner:null};this.hasVideo=false;byId('screenVideo').srcObject=null;this.render();}
 }

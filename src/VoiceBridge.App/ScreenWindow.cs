@@ -14,7 +14,7 @@ public sealed class ScreenWindow:Window
  private readonly WebView2 view=new();private readonly RoomClient room;private readonly AccountClient account;private readonly string allowedOrigin;private readonly TextBlock status=new(){Margin=new Thickness(20),Text="正在打开共享面板…"};private bool refreshing,closing,fullscreen;private WindowState previousWindowState;private string lastMember="";
  public ScreenWindow(RoomClient session,AccountClient? accountClient=null)
  {
-  room=session;lastMember=session.MemberId;room.Changed+=RoomChanged;account=accountClient??AccountClient.Current;allowedOrigin=session.Invite.Origin;if(allowedOrigin!=RoomService.DefaultOrigin&&!new Uri(allowedOrigin).IsLoopback)throw new InvalidOperationException("共享面板服务器无效");Title="屏幕共享 · VoiceBridge";Width=960;Height=760;MinWidth=560;MinHeight=460;WindowStartupLocation=WindowStartupLocation.CenterOwner;
+  room=session;lastMember=session.MemberId;room.Changed+=RoomChanged;account=accountClient??AccountClient.Current;allowedOrigin=session.Invite.Origin;if(allowedOrigin!=RoomService.DefaultOrigin&&!new Uri(allowedOrigin).IsLoopback)throw new InvalidOperationException("共享面板服务器无效");Title="房间画面 · VoiceBridge";Width=960;Height=760;MinWidth=560;MinHeight=460;WindowStartupLocation=WindowStartupLocation.CenterOwner;
   var panel=new DockPanel();DockPanel.SetDock(status,Dock.Bottom);panel.Children.Add(status);panel.Children.Add(view);Content=panel;WindowAppearance.Apply(this);Loaded+=async(_,_)=>await InitializeAsync();Closed+=(_,_)=>{closing=true;room.Changed-=RoomChanged;view.Dispose();};
  }
  private void RoomChanged(){if(closing)return;_ = Dispatcher.BeginInvoke(()=>{if(closing||view.CoreWebView2 is null)return;if(!room.SessionActive){Close();return;}if(room.MemberId.Length==32&&room.MemberId!=lastMember){lastMember=room.MemberId;view.Source=new Uri(room.ControllerLink+".embedded");status.Text="成员身份已恢复，可重新发起画面共享；原生连麦继续。";}});}
@@ -26,7 +26,11 @@ public sealed class ScreenWindow:Window
    view.CoreWebView2.Settings.AreDevToolsEnabled=false;view.CoreWebView2.Settings.AreHostObjectsAllowed=false;view.CoreWebView2.Settings.AreDefaultContextMenusEnabled=true;
    view.CoreWebView2.NavigationStarting+=(_,e)=>{if(!Uri.TryCreate(e.Uri,UriKind.Absolute,out var uri)||uri.GetLeftPart(UriPartial.Authority)!=allowedOrigin){e.Cancel=true;} };
    view.CoreWebView2.NewWindowRequested+=(_,e)=>{e.Handled=true;if(Uri.TryCreate(e.Uri,UriKind.Absolute,out var uri)&&uri.GetLeftPart(UriPartial.Authority)==allowedOrigin)Process.Start(new ProcessStartInfo(e.Uri){UseShellExecute=true});};
-   view.CoreWebView2.PermissionRequested+=(_,e)=>{if(e.PermissionKind is CoreWebView2PermissionKind.Microphone or CoreWebView2PermissionKind.Camera)e.State=CoreWebView2PermissionState.Deny;};
+   view.CoreWebView2.PermissionRequested+=(_,e)=>{if(e.PermissionKind==CoreWebView2PermissionKind.Microphone||
+       e.PermissionKind==CoreWebView2PermissionKind.Camera&&(!e.IsUserInitiated||
+        !Uri.TryCreate(e.Uri,UriKind.Absolute,out var requesting)||requesting.GetLeftPart(UriPartial.Authority)!=allowedOrigin||
+        view.Source?.AbsolutePath.StartsWith("/room/",StringComparison.Ordinal)!=true))
+       e.State=CoreWebView2PermissionState.Deny;};
    view.CoreWebView2.WebMessageReceived+=async(_,e)=>{if(e.Source.StartsWith(allowedOrigin+"/room/",StringComparison.Ordinal)){try{using var message=JsonDocument.Parse(e.WebMessageAsJson);if(message.RootElement.TryGetProperty("type",out var type)&&type.GetString()=="refreshAttachment")await RefreshAttachmentAsync();}catch(JsonException){}}};
    view.CoreWebView2.ProcessFailed+=async(_,_)=>{status.Text="共享页面正在恢复，原生连麦继续运行。";await RefreshAttachmentAsync();if(!closing)view.Reload();};
    view.CoreWebView2.ContainsFullScreenElementChanged+=(_,_)=>{bool full=view.CoreWebView2.ContainsFullScreenElement;status.Visibility=full?Visibility.Collapsed:Visibility.Visible;if(Content is DockPanel shell&&shell.Children.Count>0)shell.Children[0].Visibility=full?Visibility.Collapsed:Visibility.Visible;if(full&&!fullscreen){previousWindowState=WindowState;WindowState=WindowState.Maximized;}else if(!full&&fullscreen)WindowState=previousWindowState;fullscreen=full;};

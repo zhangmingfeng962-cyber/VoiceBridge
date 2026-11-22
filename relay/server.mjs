@@ -56,8 +56,8 @@ export async function startServer({port=Number(process.env.PORT||3000),host='0.0
         if([...peers.values()].filter(p=>p.room===room.id).length>=8){json(res,409,{error:'Room full'});return;}
         if(tickets.size>=512){json(res,429,{error:'Please retry shortly'});return;}const token=hex(32);tickets.set(hash(token),{room:room.id,userId:identity?.userId,until:now()+30000});json(res,200,{id:room.id,name:room.name,token,key:room.publicKey,origin:url.origin});return;
       }
-      if(req.method==='GET'&&url.pathname==='/health'){json(res,200,{service:'VoiceBridge encrypted music relay',protocol:3,version:3,release:'0.13.0',authRequired,passwordLogin:true,publicRooms,rename:true,nativeControls:true,lobby:true,resume:true,resumeMs,idleRoomMs:idleMs,roomTimeLimit:null,ready:true,voiceRooms:true,screenShare:1,screenRelay:!!screenConfig.turn.length,codec:'opus',sampleRate:48000,musicBitrate:256000,frameMs:20});return;}
-      if(req.method==='GET'&&(['/','/login','/account'].includes(url.pathname)||/^\/rooms?\/[a-f0-9]{32}$/.test(url.pathname))){res.writeHead(200,{...headers,'Content-Type':'text/html; charset=utf-8'});res.end(assets.get(url.pathname==='/'?'/home.html':url.pathname==='/login'?'/login.html':url.pathname==='/account'?'/account.html':'/room.html'));return;}
+      if(req.method==='GET'&&url.pathname==='/health'){json(res,200,{service:'VoiceBridge encrypted music relay',protocol:3,version:3,release:'0.14.0',cameraShare:true,authRequired,passwordLogin:true,publicRooms,rename:true,nativeControls:true,lobby:true,resume:true,resumeMs,idleRoomMs:idleMs,roomTimeLimit:null,ready:true,voiceRooms:true,screenShare:1,screenRelay:!!screenConfig.turn.length,codec:'opus',sampleRate:48000,musicBitrate:256000,frameMs:20});return;}
+      if(req.method==='GET'&&(['/','/login','/account'].includes(url.pathname)||/^\/rooms?\/[a-f0-9]{32}$/.test(url.pathname))){res.writeHead(200,{...headers,...(/^\/rooms?\//.test(url.pathname)?{'Permissions-Policy':'microphone=(self), camera=(self), display-capture=(self)'}:{}),'Content-Type':'text/html; charset=utf-8'});res.end(assets.get(url.pathname==='/'?'/home.html':url.pathname==='/login'?'/login.html':url.pathname==='/account'?'/account.html':'/room.html'));return;}
       if(req.method==='GET'&&assets.has(url.pathname)&&!url.pathname.endsWith('.html')){const extension=url.pathname.split('.').pop(),types={ico:'image/x-icon',png:'image/png',svg:'image/svg+xml',webmanifest:'application/manifest+json',css:'text/css; charset=utf-8',js:'text/javascript; charset=utf-8'};res.writeHead(200,{...headers,'Content-Type':types[extension]||'application/octet-stream'});res.end(assets.get(url.pathname));return;}
       if(req.method==='POST'&&url.pathname==='/api/rooms'){
         const token=(req.headers.authorization||'').replace(/^Bearer /,''),authorized=valid(token,64)&&equal(hash(token),publishKeyHash);
@@ -111,6 +111,7 @@ export async function startServer({port=Number(process.env.PORT||3000),host='0.0
         if(Date.now()-start>=1000){start=Date.now();controls=0;frames=[0,0];}
         if(!joined){
           if(binary)throw new Error('Join required');const input=JSON.parse(data.toString()),room=liveRoom(roomId);if(!room||input.type!=='join'||!([3,4].includes(input.version))||auth&&input.version!==4)throw new Error('Upgrade required');
+          socket.videoVersion=input.videoVersion===2?2:1;
           if(input.role==='controller'){
             const target=peers.get(input.memberId);if(auth&&(target?.userId!==socket.identity?.userId||socket.identity.scope==='controller'&&(socket.identity.roomId!==roomId||socket.identity.memberId!==input.memberId)))throw Error('Controller identity invalid');if(!target||target.room!==roomId||target.role!=='desktop'||!valid(input.controlToken,64)||!equal(input.controlToken,target.controlToken))throw new Error('Control capability invalid');
             target.controller?.close(4001,'Replaced by another control page');controllerOf=target;target.controller=socket;connectionId=hex(16);target.connectionId=connectionId;target.lastState=-1;target.pendingControl=null;if(target.hadController&&!target.nativeControls)target.microphone=false;target.hadController=true;
@@ -128,6 +129,7 @@ export async function startServer({port=Number(process.env.PORT||3000),host='0.0
           }
           const admission=valid(input.token,64)?tickets.get(hash(input.token)):null;
           if(!valid(input.token,64)||!equal(hash(input.token),room.listenHash)&&!(room.public&&admission?.room===roomId&&admission.until>=now()&&(!auth||admission.userId===socket.identity.userId)))throw new Error('Invitation invalid');
+          if(auth&&[...peers.values()].some(p=>p.room===roomId&&p.userId===socket.identity.userId)){socket.close(4012,'Account already in this room');return;}
           if(admission)tickets.delete(hash(input.token));
           if([...peers.values()].filter(p=>p.room===roomId).length>=8){socket.close(4009,'Room full');return;}
           const owner=valid(input.hostToken,64)&&equal(hash(input.hostToken),room.writeHash)&&(!auth||room.ownerAccountId===socket.identity.userId),resumeToken=input.canResume?hex(32):null;
@@ -142,10 +144,17 @@ export async function startServer({port=Number(process.env.PORT||3000),host='0.0
           const packet=Buffer.concat([Buffer.from(peer.id,'hex'),data]);for(const target of peers.values())if(target.room===roomId&&target.id!==peer.id){audioBytes+=packet.length;send(target.socket,packet,true);}return;
         }
         const message=JSON.parse(data.toString());
-        if(message.type==='ping'){if(++controls>60)throw new Error('Control rate');send(socket,{type:'pong',at:Number.isFinite(message.at)?message.at:null,sequences:peer?.lastSequences});return;}
+        if(message.type==='ping'){if(++controls>60)return;send(socket,{type:'pong',at:Number.isFinite(message.at)?message.at:null,sequences:peer?.lastSequences});return;}
         if(message.type==='leave'&&peer){socket.explicitLeave=true;dropPeer(peer);return;}
         if(typeof message.type==='string'&&message.type.startsWith('screen:')){screens.handle(controllerOf||peer,socket,message);return;}
-        if(++controls>60)throw new Error('Control rate');
+        if(peer&&message.type==='flags'&&typeof message.microphone==='boolean'&&typeof message.music==='boolean'){
+          const source=message.music?clean(message.source,60):'';
+          if(peer.microphone===message.microphone&&peer.music===message.music&&peer.source===source)return;
+          // A burst of old client volume updates must not close the room or delay muting.
+          if(++controls>60&&!(peer.microphone&&!message.microphone)&&!(peer.music&&!message.music))return;
+          Object.assign(peer,{microphone:message.microphone,music:message.music,source});announce(roomId);return;
+        }
+        if(++controls>60)return;
         if(message.type==='room:update'||message.type==='member:kick'){
           const target=controllerOf||peer,room=rooms.get(roomId);if(room?.host!==target?.id){send(socket,{type:'room:error',error:'Only the owner can manage this room'});return;}
           if(message.type==='member:kick'){const victim=peers.get(message.memberId);if(victim&&victim.room===roomId&&victim!==target){if(victim.userId)room.banned.add(victim.userId);dropPeer(victim,4011);}return;}
@@ -167,9 +176,6 @@ export async function startServer({port=Number(process.env.PORT||3000),host='0.0
           if(!Number.isSafeInteger(message.sequence)||message.sequence<=peer.lastState||typeof message.iv!=='string'||message.iv.length!==16||typeof message.data!=='string'||message.data.length>64000)throw new Error('State packet invalid');
           peer.lastState=message.sequence;if(peer.controller)send(peer.controller,message);return;
         }
-        if(message.type==='flags'&&typeof message.microphone==='boolean'&&typeof message.music==='boolean'){
-          peer.microphone=message.microphone;peer.music=message.music;peer.source=clean(message.source,60);announce(roomId);return;
-        }
         throw new Error('Unknown room message');
       }catch{socket.close(4003,'Invalid room message');}
     });
@@ -188,6 +194,6 @@ export async function startServer({port=Number(process.env.PORT||3000),host='0.0
   const metrics=setInterval(async()=>{if(!metricsFile||metricsBusy)return;metricsBusy=true;try{const elapsed=Math.max(1,Date.now()-lastMetric),bitsPerSecond=audioBytes*8000/elapsed;audioBytes=0;lastMetric=Date.now();await mkdir(path.dirname(metricsFile),{recursive:true});const temporary=metricsFile+'.'+process.pid+'.tmp';await writeFile(temporary,JSON.stringify({at:Date.now(),audioBits:Math.ceil(bitsPerSecond*1.25),screenBits:screens.shares.size?screenConfig.budget:0,active:peers.size>0}),{mode:0o640});await rename(temporary,metricsFile);}catch{}finally{metricsBusy=false;}},1000);metrics.unref();
   server.headersTimeout=10000;server.requestTimeout=15000;server.maxConnections=128;
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,host,resolve);});
-  return {server,rooms,peers,screens,maintenance,url:`http://127.0.0.1:${server.address().port}`,stop:async()=>{stopped=true;clearInterval(cleanup);clearInterval(flush);clearInterval(metrics);for(const socket of wss.clients)socket.terminate();wss.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await auth?.stop();rooms.clear();peers.clear();screens.clients.clear();screens.shares.clear();creationAttempts.clear();tickets.clear();joinAttempts.clear();}};
+  return {server,rooms,peers,screens,maintenance,url:`http://127.0.0.1:${server.address().port}`,stop:async()=>{stopped=true;clearInterval(cleanup);clearInterval(flush);clearInterval(metrics);for(const socket of wss.clients)socket.terminate();wss.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await auth?.stop();rooms.clear();peers.clear();screens.clients.clear();screens.shares.clear();screens.cameras.clear();creationAttempts.clear();tickets.clear();joinAttempts.clear();}};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){const running=await startServer();console.log('VoiceBridge room relay ready');for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>void running.stop().then(()=>process.exit()));}

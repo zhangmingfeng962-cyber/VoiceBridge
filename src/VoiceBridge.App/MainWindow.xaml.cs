@@ -18,6 +18,8 @@ public partial class MainWindow : Window
     private RoomClient? room;
     private bool busy, exiting, syncing, bindingKey;
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(500) };
+    private readonly DispatcherTimer gainTimer = new() { Interval = TimeSpan.FromMilliseconds(55) };
+    private readonly Dictionary<Slider,float> pendingGains = [];
     private readonly ProfileStore profile;
     private readonly UpdateService updates;
     private readonly ObservableCollection<MemberRow> memberRows = [];
@@ -34,6 +36,7 @@ public partial class MainWindow : Window
         account=accountClient??AccountClient.Current;profile = settings ?? new(); InitializeComponent();WindowAppearance.Apply(this);CloseToTrayCheck.IsChecked=profile.Read().CloseToTray; NicknameBox.Text = profile.Read().Nickname; MemberList.ItemsSource = memberRows;
         updates = new(() => room?.SessionActive == true || busy);
         updates.Changed += () => Dispatcher.BeginInvoke(() => { UpdateButton.Content = updates.Label; UpdateNotes.Text = updates.Notes; UpdateButton.IsEnabled = !updates.Busy; });
+        gainTimer.Tick += FlushGains;
         Closing += OnClosing; PreviewKeyDown += BindKeyDown;
         Loaded += (_,_) => { tray = new NativeTray(this, () => _ = ToggleMicrophoneAsync(), () => _ = RequestExitAsync()); _ = RefreshLobbyAsync(); _ = updates.CheckAsync(); };
         timer.Tick += async (_,_) =>
@@ -107,11 +110,11 @@ public partial class MainWindow : Window
         catch(Exception ex){StatusText.Text=ex.GetBaseException().Message;}
     }
     private async Task LeaveAsync(bool applyUpdate=true)
-    {if(room is not {} current)return;room=null;screenWindow?.Close();screenWindow=null;await current.DisposeAsync();memberRows.Clear();rosterSignature="";RefreshRoom();Lobby_Click(this,new());if(applyUpdate)await updates.AfterLeavingAsync();}
+    {if(room is not {} current)return;room=null;gainTimer.Stop();pendingGains.Clear();screenWindow?.Close();screenWindow=null;await current.DisposeAsync();memberRows.Clear();rosterSignature="";RefreshRoom();Lobby_Click(this,new());if(applyUpdate)await updates.AfterLeavingAsync();}
     private async void Leave_Click(object sender,RoutedEventArgs e)=>await LeaveAsync();
-    private async Task ApplyAsync(Func<AudioOptions,AudioOptions> change)
-    {if(syncing||room is null)return;try{await room.UpdateOptionsAsync(change(room.Audio.Options));RefreshRoom();}catch(OperationCanceledException){}catch(Exception ex){StatusText.Text=ex.GetBaseException().Message;}}
-    private Task ToggleMicrophoneAsync()=>ApplyAsync(options=>options with{Microphone=!options.Microphone});
+    private async Task ApplyAsync(Func<AudioOptions,AudioOptions> change,bool priorityMute=false)
+    {if(syncing||room is null)return;try{await room.UpdateOptionsAsync(change,priorityMute);RefreshRoom();}catch(OperationCanceledException){}catch(Exception ex){StatusText.Text=ex.GetBaseException().Message;}}
+    private Task ToggleMicrophoneAsync()=>ApplyAsync(options=>options with{Microphone=!options.Microphone},true);
     private async void Speaker_Click(object sender,RoutedEventArgs e){if(room is null)return;float current=room.Audio.Options.SpeakerGain;if(current>0)previousSpeakerGain=current;await ApplyAsync(options=>options with{SpeakerGain=current>0?0:previousSpeakerGain});}
     private async void Mic_Click(object sender,RoutedEventArgs e)=>await ToggleMicrophoneAsync();
     private async void Music_Click(object sender,RoutedEventArgs e)
@@ -121,8 +124,30 @@ public partial class MainWindow : Window
     private async void Source_Changed(object sender,SelectionChangedEventArgs e){if(!syncing&&SourceBox.SelectedValue is string id)await ApplyAsync(options=>options with{SourceId=id});}
     private async void Device_Changed(object sender,SelectionChangedEventArgs e)
     {if(!syncing&&room is not null)await ApplyAsync(options=>options with{MicrophoneId=MicrophoneBox.SelectedValue as string??options.MicrophoneId,OutputId=OutputBox.SelectedValue as string??options.OutputId});}
-    private async void Gain_Changed(object sender,RoutedPropertyChangedEventArgs<double> e)
-    {if(!syncing&&room is not null)await ApplyAsync(options=>options with{MicrophoneGain=(float)MicGainSlider.Value,SpeakerGain=(float)SpeakerGainSlider.Value,MusicGain=(float)MusicGainSlider.Value});}
+    private void Gain_Changed(object sender,RoutedPropertyChangedEventArgs<double> e)
+    {
+        if(syncing||room is null||sender is not Slider slider)return;
+        pendingGains[slider]=(float)e.NewValue;
+        gainTimer.Start();
+        RefreshGainLabels();
+    }
+    private async void FlushGains(object? sender,EventArgs e)
+    {
+        gainTimer.Stop();
+        var changes=new Dictionary<Slider,float>(pendingGains);
+        pendingGains.Clear();
+        await ApplyAsync(options=>options with{
+            MicrophoneGain=changes.GetValueOrDefault(MicGainSlider,options.MicrophoneGain),
+            SpeakerGain=changes.GetValueOrDefault(SpeakerGainSlider,options.SpeakerGain),
+            MusicGain=changes.GetValueOrDefault(MusicGainSlider,options.MusicGain)
+        });
+    }
+    private void RefreshGainLabels()
+    {
+        MicGainText.Text=$"麦克风 {MicGainSlider.Value:0}%";
+        SpeakerGainText.Text=$"房间收听 {SpeakerGainSlider.Value:0}%";
+        MusicGainText.Text=$"音乐 {MusicGainSlider.Value:0}%";
+    }
     private void BindKey_Click(object sender,RoutedEventArgs e){bindingKey=true;KeyButton.Content="按下新的说话键";}
     private async void BindKeyDown(object sender,KeyEventArgs e)
     {if(!bindingKey||room is null)return;e.Handled=true;bindingKey=false;int key=KeyInterop.VirtualKeyFromKey(e.Key==Key.System?e.SystemKey:e.Key);if(key>=8&&key<=254)await ApplyAsync(options=>options with{TalkKey=key});}
@@ -161,8 +186,8 @@ public partial class MainWindow : Window
         try{
             MicButton.Content=options.Microphone?"麦克风：开":"麦克风：关";ToggleStyle(MicButton,options.Microphone);ToggleStyle(MusicButton,options.Sharing);ToggleStyle(NoiseButton,options.NoiseSuppression);SpeakerButton.Content=options.SpeakerGain>0?"收听：开":"收听：关";ToggleStyle(SpeakerButton,options.SpeakerGain>0);NoiseButton.Content="麦克风降噪："+(options.NoiseSuppression?"开":"关");
             TalkModeBox.SelectedIndex=options.TalkMode=="ptt"?1:0;KeyButton.Content=bindingKey?"按下新的说话键":"说话键："+(options.TalkKey is >=65 and <=90?((char)options.TalkKey).ToString():options.TalkKey.ToString());
-            if(!MicGainSlider.IsMouseCaptureWithin)MicGainSlider.Value=options.MicrophoneGain;if(!SpeakerGainSlider.IsMouseCaptureWithin)SpeakerGainSlider.Value=options.SpeakerGain;if(!MusicGainSlider.IsMouseCaptureWithin)MusicGainSlider.Value=options.MusicGain;
-            MicGainText.Text="麦克风 "+options.MicrophoneGain.ToString("0")+"%";SpeakerGainText.Text="房间收听 "+options.SpeakerGain.ToString("0")+"%";MusicGainText.Text="音乐 "+options.MusicGain.ToString("0")+"%";MusicButton.Content=options.Sharing?"音乐共享：开":"音乐共享：关";
+            if(!pendingGains.ContainsKey(MicGainSlider)&&!MicGainSlider.IsMouseCaptureWithin)MicGainSlider.Value=options.MicrophoneGain;if(!pendingGains.ContainsKey(SpeakerGainSlider)&&!SpeakerGainSlider.IsMouseCaptureWithin)SpeakerGainSlider.Value=options.SpeakerGain;if(!pendingGains.ContainsKey(MusicGainSlider)&&!MusicGainSlider.IsMouseCaptureWithin)MusicGainSlider.Value=options.MusicGain;
+            RefreshGainLabels();MusicButton.Content=options.Sharing?"音乐共享：开":"音乐共享：关";
             string source=string.Join('|',audio.Inventory.Sources.Select(x=>x.Id+":"+x.Name));if(source!=sourceSignature){SourceBox.ItemsSource=audio.Inventory.Sources;sourceSignature=source;}SourceBox.SelectedValue=options.SourceId;SourceCountText.Text="检测到 "+audio.Inventory.Sources.Length+" 个音源";
             string inputs=string.Join('|',audio.Inventory.Microphones.Select(x=>x.Id));if(inputs!=inputSignature){MicrophoneBox.ItemsSource=audio.Inventory.Microphones;inputSignature=inputs;}MicrophoneBox.SelectedValue=options.MicrophoneId;
             string outputs=string.Join('|',audio.Inventory.Outputs.Select(x=>x.Id));if(outputs!=outputSignature){OutputBox.ItemsSource=audio.Inventory.Outputs;outputSignature=outputs;}OutputBox.SelectedValue=options.OutputId;

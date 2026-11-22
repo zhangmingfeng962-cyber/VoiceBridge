@@ -1,0 +1,86 @@
+name: Validate VoiceBridge 0.14.0 candidate
+on:
+  push:
+    branches: [voicebridge-0.14.0]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.403'
+      - name: Test Windows code, layouts and package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $PSNativeCommandUseErrorActionPreference=$true
+          dotnet restore VoiceBridge.sln --locked-mode
+          dotnet test VoiceBridge.sln -c Release --no-restore --nologo
+          dotnet run --project tests/VoiceBridge.LayoutHarness -c Release -- artifacts/native-layout
+          New-Item -ItemType Directory -Force artifacts/installer | Out-Null
+          gh release download v0.13.0 --pattern 'VoiceBridge.Desktop-0.13.0-win-x64-full.nupkg' --dir artifacts/installer --repo $env:GITHUB_REPOSITORY
+          $base='artifacts/installer/VoiceBridge.Desktop-0.13.0-win-x64-full.nupkg'
+          if ((Get-FileHash $base -Algorithm SHA256).Hash -ne '7AE3351AEBE06393BCD581455B6EC969448C0039F1A53F147A8AB2E8044FE772') { throw 'Update base hash mismatch' }
+          & scripts/Build-Installer.ps1
+          & scripts/Package-Preview.ps1 -OutputDirectory artifacts/source
+          Get-ChildItem artifacts/installer -File | Get-FileHash -Algorithm SHA256 | Format-Table | Out-File artifacts/installer-hashes.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VoiceBridge-0.14.0-windows-candidate
+          compression-level: 0
+          path: |
+            artifacts/installer/*0.14.0*
+            artifacts/installer/*Setup.exe
+            artifacts/installer/releases.win-x64.json
+            artifacts/installer-hashes.txt
+            artifacts/source/*.zip
+            artifacts/native-layout/*
+  browser-turn:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.3'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test relay and browser with mandatory local TURN
+        shell: bash
+        env:
+          TURN_URLS: turn:127.0.0.1:3479?transport=udp
+          TURN_SHARED_SECRET: voicebridge-014-ci-synthetic-turn-secret
+          VB_REQUIRE_RELAY: '1'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq coturn
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+          mkdir -p artifacts/browser-verify
+          turnserver -n --listening-ip=127.0.0.1 --relay-ip=127.0.0.1 --listening-port=3479 --realm=localhost --use-auth-secret --static-auth-secret="$TURN_SHARED_SECRET" --allow-loopback-peers --no-cli --no-tls --no-dtls --min-port=49160 --max-port=49259 > artifacts/browser-verify/turn.log 2>&1 &
+          turn_pid=$!
+          fixture_pid=''
+          trap 'kill "$turn_pid" "$fixture_pid" 2>/dev/null || true' EXIT
+          (cd relay && npm ci --ignore-scripts && npm test)
+          (cd relay && exec node tests/account-browser-fixture.mjs) > artifacts/browser-verify/fixture.log 2>&1 &
+          fixture_pid=$!
+          for second in $(seq 1 35); do
+            if grep -q ACCOUNT_BROWSER_FIXTURE_READY artifacts/browser-verify/fixture.log; then break; fi
+            sleep 1
+          done
+          grep -q ACCOUNT_BROWSER_FIXTURE_READY artifacts/browser-verify/fixture.log
+          python relay/tests/browser/release140.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: VoiceBridge-0.14.0-turn-evidence
+          path: artifacts/browser-verify/

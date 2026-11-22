@@ -9,5 +9,18 @@ internal static class Program{
  VisualTreeHelper.SetRootDpi(root,new DpiScale(scale,scale));root.Width=1060;root.Height=730;root.Measure(new Size(1060,730));root.Arrange(new Rect(0,0,1060,730));root.UpdateLayout();
  var controls=new Dictionary<string,Rect>();foreach(string name in new[]{"MicButton","TalkModeBox","MicGainSlider","SpeakerGainSlider","LeaveButton","MusicButton","MusicGainSlider"}){var e=(FrameworkElement)window.FindName(name);var at=e.TransformToAncestor(root).Transform(new Point());var rect=new Rect(at,new Size(e.ActualWidth,e.ActualHeight));if(rect.Left<0||rect.Top<0||rect.Right>1061||rect.Bottom>731||rect.Width<1)throw new Exception("Control outside rendered root: "+name);controls[name]=rect;}
  int width=(int)Math.Ceiling(1060*scale),height=(int)Math.Ceiling(730*scale);var bitmap=new RenderTargetBitmap(width,height,96*scale,96*scale,PixelFormats.Pbgra32);bitmap.Render(root);var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));using(var file=File.Create(Path.Combine(output,"native-dpi-"+(scale*100).ToString("0")+".png")))encoder.Save(file);results.Add(new{scale,pixels=new[]{width,height},actualDpi=VisualTreeHelper.GetDpi(root).PixelsPerDip,controls});}
- File.WriteAllText(Path.Combine(output,"layout-report.json"),System.Text.Json.JsonSerializer.Serialize(new{passed=true,offscreenWpfRendering=true,physicalMonitorSwitch=false,microphoneOpened=false,results}));Console.WriteLine("Native WPF 100/125/150/200 rendering passed");app.Shutdown();
+ var scroll=(ScrollViewer)window.FindName("RoomToolsScroll");
+ var manage=(Button)window.FindName("ManageButton");manage.Visibility=Visibility.Visible;
+ root.Width=800;root.Height=580;root.Measure(new Size(800,580));root.Arrange(new Rect(0,0,800,580));root.UpdateLayout();
+ if(scroll.ScrollableHeight<=0)throw new Exception("The short window should require the room tools to scroll");
+ scroll.ScrollToEnd();root.UpdateLayout();
+ if(Math.Abs(scroll.VerticalOffset-scroll.ScrollableHeight)>1)throw new Exception("Unable to reach end of room tools");
+ var managementRect=new Rect(manage.TransformToAncestor(root).Transform(new Point()),manage.RenderSize);
+ if(managementRect.Bottom>580||managementRect.Width<1)throw new Exception("Bottom room controls are obscured");
+ var login=new VoiceBridge.App.Accounts.AccountWindow();
+ var loginRoot=(DockPanel)login.Content;
+ var form=(StackPanel)((ScrollViewer)loginRoot.Children[1]).Content;
+ foreach(var label in form.Children.OfType<TextBlock>().Where(t=>t.Text is "欢迎回来" or "邮箱" or "密码"))
+    if(label.Foreground is not SolidColorBrush brush||brush.Color.R<200)throw new Exception("Unreadable login label: "+label.Text);
+ File.WriteAllText(Path.Combine(output,"layout-report.json"),System.Text.Json.JsonSerializer.Serialize(new{passed=true,offscreenWpfRendering=true,physicalMonitorSwitch=false,microphoneOpened=false,narrowRoomToolsReachBottom=true,visibleLoginLabels=true,results}));Console.WriteLine("Native WPF 100/125/150/200 rendering passed");app.Shutdown();
 }}

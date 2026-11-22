@@ -1,3 +1,4 @@
+import {validateNewPassword} from './web/password-policy.js';
 import {parentPort,workerData} from 'node:worker_threads';
 import {DatabaseSync} from 'node:sqlite';
 import {randomBytes,randomInt,createHash,createHmac,scryptSync,timingSafeEqual} from 'node:crypto';
@@ -27,7 +28,11 @@ const email=value=>{const s=typeof value==='string'?value.trim().toLowerCase():'
 const nickname=v=>{const name=typeof v==='string'?v.replace(/[\p{C}]/gu,'').trim().slice(0,20):'';if(!name)fail(400,'请填写昵称');return name;};
 const publicProfile=u=>({id:u.id,nickname:u.nickname,avatarUrl:u.avatar?'/avatars/'+u.avatar+'.png':null,shortId:u.id.slice(0,6)});
 function limit(key,count,milliseconds){const row=db.prepare('SELECT * FROM limits WHERE key=?').get(key);if(row&&row.until>now()&&row.count>=count)fail(429,'操作较频繁，请稍后再试');db.prepare('INSERT OR REPLACE INTO limits VALUES(?,?,?)').run(key,row?.until>now()?row.until:now()+milliseconds,row?.until>now()?row.count+1:1);}
-function password(value){if(typeof value!=='string')fail(400,'请填写密码');const s=value.normalize('NFC');if([...s].length<15||[...s].length>128||Buffer.byteLength(s)>1024)fail(400,'密码需为 15–128 个字符，可以使用中文、空格或一段短语');return s;}
+function password(value){
+  const result=validateNewPassword(value);
+  if(result.error)fail(400,result.error);
+  return result.value;
+}
 function digest(value,salt){return scryptSync(value,salt,64,{N:131072,r:8,p:1,maxmem:192*1024*1024}).toString('hex');}
 function hashPassword(value){const salt=hex(16);return 'scrypt$131072$8$1$'+salt+'$'+digest(password(value),salt);}
 const dummySalt=hex(16),dummyHash=digest('VoiceBridge timing comparison',dummySalt);

@@ -97,3 +97,34 @@ test('direct viewers do not consume the relay budget and two relay legs count tw
   c.send({type:'screen:route',session,link:bl,to:b.id,relay:false});assert.equal((await c.next(m=>m.type==='screen:error')).code,'forbidden');
  }finally{await ctx.close();}
 });
+
+test('multiple camera publishers coexist with a screen and switch atomically per member',async()=>{
+ const ctx=await setup();
+ try{
+  const r=await room(ctx.service),a=await join(ctx,r,'browser',{videoVersion:2}),b=await join(ctx,r,'browser',{videoVersion:2}),
+    c=await join(ctx,r,'browser',{videoVersion:2}),viewer=await join(ctx,r,'browser',{videoVersion:2}),legacy=await join(ctx,r);
+  const screenSession=await claim(a);
+  async function camera(member,requestId,replaceSession){
+    member.send({type:'screen:claim',cameraOwner:member.id,requestId,mode:'smooth',surface:'camera',replaceSession});
+    return (await member.next(m=>m.type==='screen:claimed'&&m.requestId===requestId&&m.cameraOwner===member.id)).session;
+  }
+  const session=await camera(b,'camera-b');
+  await camera(c,'camera-c');
+  const list=await viewer.next(m=>m.type==='screen:cameras'&&m.cameras.length===2);
+  assert.deepEqual(list.cameras.map(s=>s.owner).sort(),[b.id,c.id].sort());
+  assert.equal((await legacy.next(m=>m.type==='screen:hello')).cameras,false);
+  assert.equal(ctx.service.screens.state(r.id).owner,a.id);
+  viewer.send({type:'screen:watch',cameraOwner:b.id,session});
+  const link=(await viewer.next(m=>m.type==='screen:watching'&&m.cameraOwner===b.id)).link;
+  b.send({type:'screen:signal',cameraOwner:b.id,session,to:viewer.id,link,description:offer});
+  assert.equal((await viewer.next(m=>m.type==='screen:signal'&&m.cameraOwner===b.id)).from,b.id);
+  a.send({type:'screen:claim',cameraOwner:a.id,requestId:'no-replace',mode:'smooth',surface:'camera'});
+  assert.equal((await a.next(m=>m.type==='screen:error'&&m.requestId==='no-replace')).code,'busy');
+  await camera(a,'replace-screen',screenSession);
+  assert.equal(ctx.service.screens.shares.has(r.id),false);
+  assert.equal(ctx.service.screens.cameras.size,3);
+  const left=viewer.next(m=>m.type==='screen:cameras'&&m.cameras.length===2&&!m.cameras.some(s=>s.owner===b.id),true);
+  b.socket.close();await left;
+  assert.equal(ctx.service.screens.cameras.has(b.id),false);
+ }finally{await ctx.close();}
+});

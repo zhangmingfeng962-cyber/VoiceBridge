@@ -8,18 +8,18 @@ const errorText=error=>error?.name==='NotAllowedError'?'已取消选择或未允
 
 // Video only. Program sound deliberately remains in the existing encrypted music lane.
 export class ScreenShare{
-  constructor({selfId,send,onState=()=>{},onVideo=()=>{},onStatus=()=>{},onMetrics=()=>{},onStopped=()=>{},capture,createPeer,makeStream}={}){
-    Object.assign(this,{selfId,send,onState,onVideo,onStatus,onMetrics,onStopped});
+  constructor({selfId,send,onState=()=>{},onVideo=()=>{},onStatus=()=>{},onMetrics=()=>{},onStopped=()=>{},capture,createPeer,makeStream,camera=false,refreshIce=true,otherSession=()=>null}={}){
+    Object.assign(this,{selfId,send,onState,onVideo,onStatus,onMetrics,onStopped,camera,refreshIce,otherSession});
     this.capture=capture||((options)=>navigator.mediaDevices.getDisplayMedia(options));
     this.createPeer=createPeer||((options)=>new RTCPeerConnection(options));
     this.makeStream=makeStream||(track=>new MediaStream([track]));
-    this.state={owner:null};this.stream=null;this.session=null;this.links=new Map();this.mode='clear';this.auto=true;this.watching=true;this.selecting=false;this.closed=false;this.captureEpoch=0;this.pending=null;this.iceServers=[];this.relayAvailable=false;this.supported=false;this.expiry=0;this.watchRequest=null;this.retryCount=0;this.incoming=Promise.resolve();
+    this.state={owner:null};this.stream=null;this.session=null;this.links=new Map();this.mode=camera?'smooth':'clear';this.auto=true;this.watching=true;this.selecting=false;this.closed=false;this.captureEpoch=0;this.pending=null;this.iceServers=[];this.relayAvailable=false;this.supported=false;this.expiry=0;this.watchRequest=null;this.retryCount=0;this.incoming=Promise.resolve();
   }
   emit(){this.onState({...this.state,self:this.state.owner===this.selfId,selecting:this.selecting,watching:this.watching,mode:this.state.owner===this.selfId?this.mode:this.state.mode||this.mode,auto:this.auto,supported:this.supported,relayAvailable:this.relayAvailable});}
   configure(message){
     const renewed=!!this.expiry&&message.expires>this.expiry;
     this.iceServers=message.iceServers||[];this.expiry=message.expires;this.relayAvailable=!!message.relayAvailable;this.supported=message.version===1;
-    if(!this.refreshTimer){this.refreshTimer=setInterval(()=>this.send({type:'screen:ice'}),240000);this.refreshTimer.unref?.();}
+    if(this.refreshIce&&!this.refreshTimer){this.refreshTimer=setInterval(()=>this.send({type:'screen:ice'}),240000);this.refreshTimer.unref?.();}
     if(renewed)for(const item of this.links.values()){
       try{item.pc.setConfiguration({...item.pc.getConfiguration(),iceServers:this.iceServers});}catch{}
       if(item.owner)this.restartIce(item);
@@ -89,8 +89,8 @@ export class ScreenShare{
       if(this.closed||request!==this.captureEpoch){stopTracks(selected);return;}
       selected.getAudioTracks().forEach(track=>{track.stop();selected.removeTrack?.(track);});
       const track=selected.getVideoTracks()[0];if(!track||track.readyState==='ended')throw Error('没有可用的画面轨道');
-      const surface=track.getSettings().displaySurface||'monitor';
-      if(!['window','monitor','browser'].includes(surface))throw Error('不支持所选画面来源');
+      const surface=this.camera?'camera':track.getSettings().displaySurface||'monitor';
+      if(!['window','monitor','browser','camera'].includes(surface))throw Error('不支持所选画面来源');
       if(replace&&this.stream&&this.state.owner===this.selfId){
         track.enabled=!this.state.paused;
         for(const item of this.links.values())if(item.sender){await item.sender.replaceTrack(this.state.paused?null:track);replaced.push(item);}
@@ -99,7 +99,7 @@ export class ScreenShare{
       }else{
         this.stream=selected;
         const requestId=globalThis.crypto.randomUUID().replaceAll('-','').slice(0,32);
-        await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{this.pending=null;reject(Error('请求共享超时，请重试'));},8000);this.pending={id:requestId,resolve,reject,timer};this.send({type:'screen:claim',requestId,mode:this.mode,surface});});
+        await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{this.pending=null;reject(Error('请求共享超时，请重试'));},8000);this.pending={id:requestId,resolve,reject,timer};this.send({type:'screen:claim',requestId,mode:this.mode,surface,replaceSession:this.otherSession()||undefined});});
         if(this.closed||request!==this.captureEpoch){stopTracks(selected);if(this.session)this.send({type:'screen:stop',session:this.session});return;}
       }
       track.onended=()=>{if(this.stream===selected)this.stop();};
@@ -111,10 +111,10 @@ export class ScreenShare{
       if(replace&&this.stream&&this.stream!==selected){const oldTrack=this.stream.getVideoTracks()[0];for(const item of replaced)try{await item.sender.replaceTrack(this.state.paused?null:oldTrack);}catch{this.closeLink(item.peer);}}
       stopTracks(selected);
       if(this.stream===selected){this.stream=null;if(this.session)this.send({type:'screen:stop',session:this.session});this.session=null;this.onVideo(null,true);this.onStopped();}
-      if(request===this.captureEpoch&&!this.closed)this.onStatus(errorText(error));
+      if(request===this.captureEpoch&&!this.closed)this.onStatus(this.camera&&error?.name==='NotAllowedError'?'摄像头未获授权，可以继续使用语音。':this.camera&&error?.name==='NotFoundError'?'未找到摄像头。':errorText(error));
     }finally{if(request===this.captureEpoch){this.selecting=false;this.emit();}}
   }
-  update(){if(this.session&&this.stream)this.send({type:'screen:update',session:this.session,paused:!!this.state.paused,mode:this.mode,surface:this.stream.getVideoTracks()[0]?.getSettings().displaySurface||'monitor'});}
+  update(){if(this.session&&this.stream)this.send({type:'screen:update',session:this.session,paused:!!this.state.paused,mode:this.mode,surface:this.camera?'camera':this.stream.getVideoTracks()[0]?.getSettings().displaySurface||'monitor'});}
   async pause(value=!this.state.paused){
     if(this.state.owner!==this.selfId||!this.stream)return;
     const session=this.session,track=this.stream.getVideoTracks()[0];
@@ -126,7 +126,7 @@ export class ScreenShare{
     }catch{track.enabled=false;this.state={...this.state,paused:true};this.update();this.emit();this.onStatus('画面保持暂停，请更换来源或重新共享');}
   }
   async constraints(){
-    const track=this.stream?.getVideoTracks()[0];if(!track)return;const p=screenProfiles[this.mode];track.contentHint=this.mode==='clear'?'detail':'motion';
+    const track=this.stream?.getVideoTracks()[0];if(!track)return;const p=screenProfiles[this.mode];track.contentHint=!this.camera&&this.mode==='clear'?'detail':'motion';
     try{await track.applyConstraints({width:{ideal:p.width,max:p.width},height:{ideal:p.height,max:p.height},frameRate:{ideal:p.fps,max:p.fps}});}catch{this.onStatus('设备未接受全部画质限制，仍会限制发送码率');}
   }
   async addCandidate(item,candidate){
@@ -144,7 +144,7 @@ export class ScreenShare{
     },500);
   }
   resume(){
-    if(this.closed)return;this.send({type:'screen:ice'});
+    if(this.closed)return;if(this.refreshIce)this.send({type:'screen:ice'});
     for(const item of this.links.values())if(item.owner)this.restartIce(item);
     if(this.state.owner&&this.state.owner!==this.selfId&&this.watching&&![...this.links.values()].some(x=>x.pc.connectionState==='connected'))this.watch(true);
   }
@@ -183,11 +183,11 @@ export class ScreenShare{
   limit(item){
     item.work=item.work.then(async()=>{
       if(!item.sender||this.links.get(item.peer)!==item)return;
-      const profile=screenProfiles[this.mode],ceiling=Math.min(profile.bitrate,this.state.budgets?.[item.peer]||this.state.maxBitrate||profile.bitrate),bitrate=Math.max(Math.min(32000,ceiling),Math.floor(ceiling*(this.auto?item.factor:1)));
+      const profile=screenProfiles[this.mode],ceiling=Math.min(profile.bitrate,this.state.budgets?.[item.peer]??this.state.maxBitrate??profile.bitrate),bitrate=Math.max(Math.min(32000,ceiling),Math.floor(ceiling*(this.auto?item.factor:1)));
       const fps=Math.min(profile.fps,bitrate>=3000000?60:bitrate>=2000000?45:bitrate>=1000000?30:bitrate>=500000?20:bitrate>=200000?12:6);
       const params=item.sender.getParameters();if(!params.encodings?.length)return;
-      Object.assign(params.encodings[0],{maxBitrate:bitrate,maxFramerate:fps,scaleResolutionDownBy:1,priority:'low'});
-      params.degradationPreference='maintain-resolution';
+      Object.assign(params.encodings[0],{active:ceiling>0,maxBitrate:Math.max(1,bitrate),maxFramerate:fps,scaleResolutionDownBy:this.camera&&bitrate<500000?2:1,priority:'low'});
+      params.degradationPreference=this.camera?'balanced':'maintain-resolution';
       try{await item.sender.setParameters(params);}catch{delete params.encodings[0].priority;delete params.degradationPreference;await item.sender.setParameters(params);}
       item.bitrate=bitrate;item.targetFps=fps;
     }).catch(()=>this.onStatus('浏览器无法应用部分画质设置，网络拥塞控制仍由 WebRTC 执行'));return item.work;
@@ -210,7 +210,7 @@ export class ScreenShare{
         else if(++item.stable>=6){item.factor=Math.min(1,item.factor+.08);item.stable=0;}
         await this.limit(item);
       }
-      if(item.route!==relayHops&&video&&selected){item.route=relayHops;this.send({type:'screen:route',session:item.session,link:item.link,to:item.peer,relay,relayHops});}
+      if(item.route!==relayHops&&selected){item.route=relayHops;this.send({type:'screen:route',session:item.session,link:item.link,to:item.peer,relay,relayHops});}
       this.onMetrics({peer:item.peer,owner:item.owner,rttMs:Math.round(rtt*1000),relay,bitrate:item.bitrate||0,width:video?.frameWidth||0,height:video?.frameHeight||0,fps:Math.round(video?.framesPerSecond||0),targetFps:item.targetFps,limited:video?.qualityLimitationReason||'',paused:!!this.state.paused});
     }catch{} // Closing a peer during getStats is a normal source-change/leave race.
   }

@@ -10,7 +10,7 @@ export class Outbound {
       const queue=value[20]===0?this.voice:this.music;
       if(queue.length>=6){queue.shift();this.dropped++;}queue.push(entry);
     }else{
-      const key=['members','state','screen:state'].includes(value.type)?value.type+(value.connectionId||''):null;
+      const key=['members','room','state','screen:state','screen:cameras'].includes(value.type)?value.type+(value.connectionId||''):null;
       entry.key=key;
       const previous=key?this.controls.findIndex(x=>x.key===key):-1;
       if(previous>=0)this.controls.splice(previous,1);

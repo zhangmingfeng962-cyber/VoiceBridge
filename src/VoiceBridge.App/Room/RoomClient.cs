@@ -58,7 +58,7 @@ public sealed class RoomClient : IAsyncDisposable
         using var client = new HttpClient { BaseAddress = new Uri(origin), Timeout = TimeSpan.FromSeconds(15) };
         using var health = JsonDocument.Parse(await client.GetStringAsync("/health", stop.Token));
         if (!health.RootElement.TryGetProperty("protocol", out var version) || version.GetInt32() < 3) throw new InvalidOperationException("中继尚未升级到新版音乐房间。");
-        client.DefaultRequestHeaders.Add("X-VoiceBridge-Client", "0.13.0");
+        client.DefaultRequestHeaders.Add("X-VoiceBridge-Client", "0.14.0");
         if(authorization(origin) is {} bearer)client.DefaultRequestHeaders.Authorization=new("Bearer",bearer);
         byte[] rootKey = RandomNumberGenerator.GetBytes(32);
         using var created = await client.PostAsync("/api/rooms", new StringContent(JsonSerializer.Serialize(new { name = roomName ?? name + "的房间", @public = publicRoom, publicKey = publicRoom ? Convert.ToHexString(rootKey).ToLowerInvariant() : null }), Encoding.UTF8, "application/json"), stop.Token);
@@ -79,12 +79,21 @@ public sealed class RoomClient : IAsyncDisposable
         await startAudio(Audio); Audio.SetNetworkConnected(Connected); SendFlags();
         stateLoop = Task.Run(StateLoopAsync); Status = "已连接"; Changed?.Invoke();
     }
-    public async Task UpdateOptionsAsync(AudioOptions next)
+    public Task UpdateOptionsAsync(AudioOptions next)=>UpdateOptionsAsync(_=>next,true);
+    public async Task UpdateOptionsAsync(Func<AudioOptions,AudioOptions> change, bool priorityMute=false)
     {
-        long revision = Interlocked.Increment(ref configurationRevision);
-        if (!next.Microphone) Audio.PrivacyMute();
+        if(priorityMute && !change(Audio.Options).Microphone) Audio.PrivacyMute();
         await configurationGate.WaitAsync(stop.Token);
-        try { if (revision != ConfigurationRevision) return; await Audio.ApplyAsync(next); SaveAudioPreferences(); SendFlags(); Changed?.Invoke(); }
+        try
+        {
+            var current=Audio.Options;
+            var next=change(current);
+            Interlocked.Increment(ref configurationRevision);
+            await Audio.ApplyAsync(next);
+            SaveAudioPreferences();
+            if(current.Microphone!=next.Microphone||current.Sharing!=next.Sharing||current.SourceId!=next.SourceId) SendFlags();
+            Changed?.Invoke();
+        }
         finally { configurationGate.Release(); }
     }
     public void Rename(string name) => Queue(new { type = "rename", name = ProfileSettings.CleanName(name) });
@@ -147,8 +156,8 @@ public sealed class RoomClient : IAsyncDisposable
                     if (transport.HttpStatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.NotFound) { Status = "房间已关闭或邀请失效"; joined.TrySetException(ex); break; }
                     if (ex is RoomDisconnected expired && expired.Code == 4010)
                     { MemberId = ""; resumeToken = null; sequences[0] = sequences[1] = 0; seenRoster = false; connectionId = null; if (Invite.Public) { try { Invite = await LobbyClient.ResolveAsync(Invite.RoomId, stop.Token, Invite.Origin); } catch (Exception failure) when (failure is InvalidOperationException or HttpRequestException) { Status = failure.Message; break; } } continue; }
-                    if (ex is RoomDisconnected terminal && terminal.Code is 1000 or 4001 or 4003 or 4004 or 4009 or 4011)
-                    { Status = terminal.Code == 4009 ? "房间已满，最多 8 人" : terminal.Code == 4010 ? "重连保留时间已结束，请重新加入房间" : "房间已结束或连接权限失效，请重新加入"; joined.TrySetException(ex); break; }
+                    if (ex is RoomDisconnected terminal && terminal.Code is 1000 or 4001 or 4003 or 4004 or 4009 or 4011 or 4012)
+                    { Status = terminal.Code == 4012 ? "此账号已在另一窗口或设备加入该房间" : terminal.Code == 4009 ? "房间已满，最多 8 人" : terminal.Code == 4010 ? "重连保留时间已结束，请重新加入房间" : "房间已结束或连接权限失效，请重新加入"; joined.TrySetException(terminal.Code == 4012 ? new InvalidOperationException(Status) : ex); break; }
                     if (!joined.Task.IsCompletedSuccessfully) { Status = "无法连接房间：" + ex.Message; joined.TrySetException(ex); break; }
                     recoveryStarted = recoveryStarted == 0 ? Environment.TickCount64 : recoveryStarted;
                     Status = "网络波动，正在自动重连… 音频上行已暂停"; Changed?.Invoke();
@@ -246,6 +255,19 @@ public sealed class RoomClient : IAsyncDisposable
         if (connection != connectionId) return;
         string? action = command.TryGetProperty("action", out var property) ? property.GetString() : null;
         if (action == "leave") { _ = Task.Run(async () => await DisposeAsync()); return; }
+        if(action=="mute")
+        {
+            await UpdateOptionsAsync(options=>options with{Microphone=false},true);
+            if(command.TryGetProperty("revision",out var muteRevision))appliedRevision=muteRevision.GetInt64();
+            return;
+        }
+        if(action=="gains")
+        {
+            var values=command.GetProperty("gains");
+            await UpdateOptionsAsync(options=>ApplyGains(options,values));
+            if(command.TryGetProperty("revision",out var gainRevision))appliedRevision=gainRevision.GetInt64();
+            return;
+        }
         if (action == "configure")
         {
             if (command.TryGetProperty("revision", out var receivedRevision)) appliedRevision = receivedRevision.GetInt64();
@@ -261,6 +283,31 @@ public sealed class RoomClient : IAsyncDisposable
         }
         SendFlags(); Changed?.Invoke();
     }
+    private AudioOptions ApplyGains(AudioOptions options,JsonElement values)
+    {
+        static float ReadGain(JsonElement scope,string name,float fallback,float maximum)
+        {
+            return scope.ValueKind==JsonValueKind.Object&&scope.TryGetProperty(name,out var element)&&
+                element.ValueKind==JsonValueKind.Number&&element.TryGetSingle(out var value)&&float.IsFinite(value)
+                ?Math.Clamp(value,0,maximum):fallback;
+        }
+        Dictionary<string,float> MemberGains(string lane,Dictionary<string,float> current,float maximum)
+        {
+            if(values.ValueKind!=JsonValueKind.Object||!values.TryGetProperty(lane,out var updates))return current;
+            var result=new Dictionary<string,float>(current);
+            foreach(var member in Members)
+                if(updates.ValueKind==JsonValueKind.Object&&updates.TryGetProperty(member.Id,out _))
+                    result[member.Id]=ReadGain(updates,member.Id,current.GetValueOrDefault(member.Id,100),maximum);
+            return result;
+        }
+        return options with{
+            MicrophoneGain=ReadGain(values,"microphoneGain",options.MicrophoneGain,400),
+            SpeakerGain=ReadGain(values,"speakerGain",options.SpeakerGain,200),
+            MusicGain=ReadGain(values,"musicGain",options.MusicGain,100),
+            MemberVoice=MemberGains("memberVoice",options.MemberVoice,200),
+            MemberMusic=MemberGains("memberMusic",options.MemberMusic,100)
+        };
+    }
     private async Task StateLoopAsync()
     {
         try
@@ -272,7 +319,7 @@ public sealed class RoomClient : IAsyncDisposable
                 if (Connected && connectionId is { } connection)
                 {
                     var inventory = Audio.Inventory;
-                    Queue(cipher!.SealControl(MemberId, connection, stateSequence++, new { options = Audio.Options, noiseSuppressionAvailable = true, clientVersion = "0.12.0", nativeControls = true, configurationRevision = ConfigurationRevision, controlNotice = ControlNotice, microphoneReady = Audio.MicrophoneReady, outputReady = Audio.OutputReady, microphones = inventory.Microphones, outputs = inventory.Outputs, sources = inventory.Sources.Select(s => new { s.Id, s.Name, s.Active }), status = Audio.Status, microphonePeak = Audio.MicrophonePeak, talking = Audio.Talking, streams = Audio.Mix.Statistics(), speakerPeak = Audio.Mix.Peak, appliedRevision, nativePlayback = true }, true));
+                    Queue(cipher!.SealControl(MemberId, connection, stateSequence++, new { options = Audio.Options, noiseSuppressionAvailable = true, clientVersion = "0.14.0", gainPatches = true, nativeControls = true, configurationRevision = ConfigurationRevision, controlNotice = ControlNotice, microphoneReady = Audio.MicrophoneReady, outputReady = Audio.OutputReady, microphones = inventory.Microphones, outputs = inventory.Outputs, sources = inventory.Sources.Select(s => new { s.Id, s.Name, s.Active }), status = Audio.Status, microphonePeak = Audio.MicrophonePeak, talking = Audio.Talking, streams = Audio.Mix.Statistics(), speakerPeak = Audio.Mix.Peak, appliedRevision, nativePlayback = true }, true));
                 }
                 await Task.Delay(500, stop.Token);
             }

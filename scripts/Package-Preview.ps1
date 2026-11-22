@@ -5,7 +5,7 @@ $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if(!$OutputDirectory){$OutputDirectory=Join-Path $root 'artifacts/packages'}
 $output=[IO.Path]::GetFullPath($OutputDirectory)
 [IO.Directory]::CreateDirectory($output)|Out-Null
-$version='0.13.0'
+$version='0.14.0'
 $staging=Join-Path $output ('source-'+[Guid]::NewGuid().ToString('N'))
 $source=Join-Path $staging 'VoiceBridge'
 [IO.Directory]::CreateDirectory($source)|Out-Null

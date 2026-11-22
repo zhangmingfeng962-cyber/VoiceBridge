@@ -1,4 +1,4 @@
-param([string]$Version='0.13.0',[string]$OutputDirectory='artifacts/installer',[string]$Notes='docs/RELEASE-NOTES-0.13.0.md')
+param([string]$Version='0.14.0',[string]$OutputDirectory='artifacts/installer',[string]$Notes='docs/RELEASE-NOTES-0.14.0.md')
 $ErrorActionPreference='Stop'
 $PSNativeCommandUseErrorActionPreference=$true
 $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -9,6 +9,6 @@ try {
  dotnet publish src/VoiceBridge.App/VoiceBridge.App.csproj -c Release -r win-x64 --self-contained true --no-restore -o artifacts/install-app
  $runtime=Get-Content artifacts/install-app/VoiceBridge.runtimeconfig.json -Raw|ConvertFrom-Json
  if(@($runtime.runtimeOptions.includedFrameworks|Where-Object {$_.version -ne '10.0.14'}).Count){throw 'Runtime must be 10.0.14'}
- dotnet tool install vpk --version 1.2.161 --tool-path artifacts/tools
+ if (!(Test-Path artifacts/tools/vpk.exe)) { dotnet tool install vpk --version 1.2.161 --tool-path artifacts/tools }
  & artifacts/tools/vpk.exe pack --packId VoiceBridge.Desktop --packVersion $Version --packDir artifacts/install-app --mainExe VoiceBridge.exe --channel win-x64 --runtime win-x64 --packTitle VoiceBridge --icon src/VoiceBridge.App/Assets/voicebridge.ico --shortcuts Desktop,StartMenuRoot --delta BestSize --releaseNotes $Notes --outputDir $OutputDirectory
 } finally {Pop-Location}
